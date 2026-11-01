@@ -35,7 +35,7 @@ jobs:
         run: |
           echo "=== 1. Aktualizacja LibResolveURL (VOE, Streamtape) ==="
           rm -rf resolver/LibResolveURL
-          git clone --depth 1 https://github.com/Gujal00/smr.git resolver/LibResolveURL
+          git clone --depth 1 https://github.com/Gujal00/ResolveURL.git resolver/LibResolveURL
           mkdir -p app
           python3 -c "import shutil; shutil.make_archive('app/app', 'zip', 'resolver')"
 
