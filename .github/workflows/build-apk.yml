@@ -57,8 +57,9 @@ jobs:
           python3 patch_cf.py
           rm -f patch_cf.py
 
-          echo "=== 4. Dostosowanie Android SDK (34) i NDK dla środowiska GitHub ==="
-          sed -i 's/compileSdk = 36/compileSdk = 34/g' android/app/build.gradle.kts
+          echo "=== 4. Dostosowanie Android SDK i minSdk dla Python NDK ==="
+          sed -i 's/compileSdk = 36/compileSdk = 35/g' android/app/build.gradle.kts
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle.kts
           sed -i '/ndkVersion/d' android/app/build.gradle.kts
 
       - name: Setup Signing Key
@@ -76,7 +77,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Release APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --verbose
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
