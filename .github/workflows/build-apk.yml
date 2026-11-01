@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Android Release APK
+    name: Build Android APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -57,30 +57,22 @@ jobs:
           python3 patch_cf.py
           rm -f patch_cf.py
 
-          echo "=== 4. Dostosowanie Android SDK i minSdk dla Python NDK ==="
-          sed -i 's/compileSdk = 36/compileSdk = 35/g' android/app/build.gradle.kts
+          echo "=== 4. Usuwanie wadliwego pluginu Crashlytics i naprawa SDK ==="
+          sed -i '/crashlytics/d' android/app/build.gradle.kts
+          sed -i '/crashlytics/d' android/settings.gradle.kts
+          sed -i 's/compileSdk = 36/compileSdk = 34/g' android/app/build.gradle.kts
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle.kts
           sed -i '/ndkVersion/d' android/app/build.gradle.kts
-
-      - name: Setup Signing Key
-        run: |
-          KEY_PATH="$GITHUB_WORKSPACE/android/app/release.keystore"
-          keytool -genkey -v -keystore "$KEY_PATH" -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
-          cat << EOF > android/key.properties
-          storePassword=purevideopass
-          keyPassword=purevideopass
-          keyAlias=purevideo
-          storeFile=$KEY_PATH
-          EOF
 
       - name: Install Flutter Packages
         run: flutter pub get
 
-      - name: Build Release APK
-        run: flutter build apk --release --no-tree-shake-icons --verbose
+      - name: Build Android APK
+        run: |
+          flutter build apk --debug
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PureVideo-Fixed-Release-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: PureVideo-Fixed-APK
+          path: build/app/outputs/flutter-apk/*.apk
