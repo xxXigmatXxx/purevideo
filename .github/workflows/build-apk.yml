@@ -31,19 +31,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Apply All Fixes Automatically (VOE, Ekino, Filman Cloudflare)
+      - name: Apply All Fixes Automatically
         run: |
           echo "=== 1. Aktualizacja LibResolveURL (VOE, Streamtape) ==="
           rm -rf resolver/LibResolveURL
           git clone --depth 1 https://github.com/Gujal00/smr.git resolver/LibResolveURL
-          mkdir -p assets/app
-          python3 -c "import shutil; shutil.make_archive('assets/app/app', 'zip', 'resolver')"
+          mkdir -p app
+          python3 -c "import shutil; shutil.make_archive('app/app', 'zip', 'resolver')"
 
           echo "=== 2. Naprawa domeny Ekino (ekino.ws) ==="
           sed -i 's|https://ekino-tv.pl|https://ekino.ws|g' lib/core/utils/supported_enum.dart
 
-          echo "=== 3. Naprawa okna Cloudflare dla Filmana (widoczny checkbox) ==="
-          python3 -c "
+          echo "=== 3. Naprawa okna Cloudflare dla Filmana ==="
+          cat << 'EOF' > patch_cf.py
           p = 'lib/core/services/webview_service.dart'
           with open(p, 'r', encoding='utf-8') as f:
               c = f.read()
@@ -54,12 +54,14 @@ jobs:
           c = c.replace('Colors.transparent', 'const Color(0xFF1E293B)')
           with open(p, 'w', encoding='utf-8') as f:
               f.write(c)
-          "
+          EOF
+          python3 patch_cf.py
+          rm -f patch_cf.py
 
       - name: Setup Signing Key
         run: |
           keytool -genkey -v -keystore android/app/release.keystore -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
-          cat <<EOF > android/key.properties
+          cat << 'EOF' > android/key.properties
           storePassword=purevideopass
           keyPassword=purevideopass
           keyAlias=purevideo
