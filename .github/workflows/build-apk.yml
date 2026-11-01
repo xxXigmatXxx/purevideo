@@ -39,7 +39,7 @@ jobs:
           python3 patch_cf.py
           rm -f patch_cf.py
 
-          echo "=== 4. Dodanie scrapera VOE i aktualizacja podpisu APK ==="
+          echo "=== 4. Dodanie scrapera VOE ==="
           cat << 'EOF' > lib/core/video_hosts/scrapers/voe_scraper.dart
           import 'dart:convert';
           import 'package:dio/dio.dart';
@@ -112,24 +112,19 @@ jobs:
           python3 patch_reg.py
           rm -f patch_reg.py
 
-          cat << 'EOF' > patch_gradle.py
-          with open("android/app/build.gradle.kts", "r") as f:
-              c = f.read()
-          c = c.replace('signingConfig = signingConfigs.getByName("release")', 'signingConfig = signingConfigs.getByName("debug")')
-          c = c.replace('keyAlias = keystoreProperties["keyAlias"] as String', 'keyAlias = (keystoreProperties["keyAlias"] as String?) ?: "debug"')
-          c = c.replace('keyPassword = keystoreProperties["keyPassword"] as String', 'keyPassword = (keystoreProperties["keyPassword"] as String?) ?: "debug"')
-          c = c.replace('storePassword = keystoreProperties["storePassword"] as String', 'storePassword = (keystoreProperties["storePassword"] as String?) ?: "debug"')
-          with open("android/app/build.gradle.kts", "w") as f:
-              f.write(c)
-          EOF
-          python3 patch_gradle.py
-          rm -f patch_gradle.py
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
+
+      - name: Generate Keystore (Identical to Author Setup)
+        run: |
+          keytool -genkey -v -keystore android/app/keystore.jks -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
+          echo "storePassword=purevideopass" > android/key.properties
+          echo "keyPassword=purevideopass" >> android/key.properties
+          echo "keyAlias=purevideo" >> android/key.properties
+          echo "storeFile=keystore.jks" >> android/key.properties
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
