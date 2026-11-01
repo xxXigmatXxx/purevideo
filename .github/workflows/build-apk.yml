@@ -57,21 +57,32 @@ jobs:
           python3 patch_cf.py
           rm -f patch_cf.py
 
-          echo "=== 4. Usuwanie wadliwego pluginu Crashlytics i naprawa SDK ==="
-          sed -i '/crashlytics/d' android/app/build.gradle.kts
+          echo "=== 4. Dostosowanie Android SDK i podpis debug ==="
+          cat << 'EOF' > patch_gradle.py
+          with open("android/app/build.gradle.kts", "r") as f:
+              c = f.read()
+          c = c.replace("compileSdk = 36", "compileSdk = 35")
+          c = c.replace("minSdk = flutter.minSdkVersion", "minSdk = 24")
+          c = c.replace('id("com.google.firebase.crashlytics")', '// removed crashlytics')
+          c = c.replace('ndkVersion = "28.2.13676358"', '// removed ndk')
+          c = c.replace('signingConfig = signingConfigs.getByName("release")', 'signingConfig = signingConfigs.getByName("debug")')
+          c = c.replace('if (keystoreProperties.containsKey("storeFile")) {', 'if (true) {')
+          with open("android/app/build.gradle.kts", "w") as f:
+              f.write(c)
+          EOF
+          python3 patch_gradle.py
+          rm -f patch_gradle.py
           sed -i '/crashlytics/d' android/settings.gradle.kts
-          sed -i 's/compileSdk = 36/compileSdk = 34/g' android/app/build.gradle.kts
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle.kts
-          sed -i '/ndkVersion/d' android/app/build.gradle.kts
 
       - name: Install Flutter Packages
         run: flutter pub get
 
       - name: Build Android APK
         run: |
-          flutter build apk --target-platform android-arm64 --no-tree-shake-icons
+          flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons
 
       - name: Upload APK as Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: PureVideo-Fixed-APK
