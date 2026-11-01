@@ -32,16 +32,16 @@ jobs:
 
       - name: Apply All Fixes Automatically
         run: |
-          echo "=== 1. Aktualizacja LibResolveURL (VOE, Streamtape) ==="
+          echo "=== 1. Aktualizacja LibResolveURL ==="
           rm -rf resolver/LibResolveURL
           git clone --depth 1 https://github.com/Gujal00/ResolveURL.git resolver/LibResolveURL
           mkdir -p app
           python3 -c "import shutil; shutil.make_archive('app/app', 'zip', 'resolver')"
 
-          echo "=== 2. Naprawa domeny Ekino (ekino.ws) ==="
+          echo "=== 2. Naprawa domeny Ekino ==="
           sed -i 's|https://ekino-tv.pl|https://ekino.ws|g' lib/core/utils/supported_enum.dart
 
-          echo "=== 3. Naprawa okna Cloudflare dla Filmana ==="
+          echo "=== 3. Naprawa okna Cloudflare ==="
           cat << 'EOF' > patch_cf.py
           p = 'lib/core/services/webview_service.dart'
           with open(p, 'r', encoding='utf-8') as f:
@@ -77,9 +77,19 @@ jobs:
       - name: Install Flutter Packages
         run: flutter pub get
 
+      - name: Run Build Runner (Generate missing Hive files)
+        run: dart run build_runner build --delete-conflicting-outputs || true
+
       - name: Build Android APK
         run: |
-          flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons
+          flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons 2>&1 | tee build_log.txt || \
+          flutter build apk --debug --target-platform android-arm64 2>&1 | tee -a build_log.txt
+
+      - name: Display Error Summary on GitHub
+        if: always()
+        run: |
+          echo "### Podsumowanie:" >> $GITHUB_STEP_SUMMARY
+          tail -n 60 build_log.txt >> $GITHUB_STEP_SUMMARY || true
 
       - name: Upload APK as Artifact
         if: always()
