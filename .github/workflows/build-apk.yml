@@ -57,14 +57,19 @@ jobs:
           python3 patch_cf.py
           rm -f patch_cf.py
 
+          echo "=== 4. Dostosowanie Android SDK (34) i NDK dla środowiska GitHub ==="
+          sed -i 's/compileSdk = 36/compileSdk = 34/g' android/app/build.gradle.kts
+          sed -i '/ndkVersion/d' android/app/build.gradle.kts
+
       - name: Setup Signing Key
         run: |
-          keytool -genkey -v -keystore android/app/release.keystore -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
-          cat << 'EOF' > android/key.properties
+          KEY_PATH="$GITHUB_WORKSPACE/android/app/release.keystore"
+          keytool -genkey -v -keystore "$KEY_PATH" -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
+          cat << EOF > android/key.properties
           storePassword=purevideopass
           keyPassword=purevideopass
           keyAlias=purevideo
-          storeFile=release.keystore
+          storeFile=$KEY_PATH
           EOF
 
       - name: Install Flutter Packages
