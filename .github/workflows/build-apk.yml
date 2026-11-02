@@ -291,26 +291,24 @@ jobs:
           print('=== 4. Patching filman_movie_repository.dart ===')
           p_fmr = 'lib/data/repositories/filman/filman_movie_repository.dart'
           s_fmr = open(p_fmr, encoding='utf-8').read()
-          old_fmr_dec = '''        final decoded = base64Decode(
-                      row.querySelector('a[data-iframe]')?.attributes['data-iframe'] ??
-                          '');
-                  link = (utf8.decode(decoded));'''.replace('            ', '  ')
+          m_res = re.search(r'Future<String> _resolveTempUrl\(String tempUrl\) async \{[\s\S]*?\n  \}', s_fmr)
+          if m_res:
+              s_fmr = s_fmr[:m_res.start()] + 'Future<String> _resolveTempUrl(String tempUrl) async => tempUrl;' + s_fmr[m_res.end():]
           s_fmr = s_fmr.replace('link = (utf8.decode(decoded));', '''final d = utf8.decode(decoded).trim(); if (d.startsWith('{')) { try { final dynamic m = jsonDecode(d); link = (m is Map ? (m['src'] ?? m['url'] ?? d) : d).toString().trim(); } catch (_) { link = d; } } else { link = d; } if (link.startsWith('//')) link = 'https:$link';''')
           s_fmr = s_fmr.replace("return '';", 'return tempUrl;')
           s_fmr = s_fmr.replace('if (tableData.length < 3) continue;', 'if (tableData.isEmpty) continue;')
           open(p_fmr, 'w', encoding='utf-8').write(s_fmr)
 
-          print('=== 5. Patching resolve_url_service.dart ===')
+          print('=== 5. Patching resolve_url_service.dart (fast polling & non-blocking fallback) ===')
           p_rus = 'lib/core/services/resolve_url_service.dart'
-          s_rus = open(p_rus, encoding='utf-8').read()
-          s_rus = s_rus.replace('return [];', "return urls.where((u) => u.url.isNotEmpty).map((u) => VideoSource(url: u.url, lang: u.lang, quality: u.quality, host: 'Odtwarzacz (Web)', headers: const {'Referer': 'https://filman.cc/'})).toList();")
-          open(p_rus, 'w', encoding='utf-8').write(s_rus)
+          new_rus = '''import "dart:convert";\nimport "package:dio/dio.dart";\nimport "package:flutter/cupertino.dart";\nimport "package:purevideo/data/models/link_model.dart";\nimport "package:purevideo/data/repositories/video_source_repository.dart";\n\nclass ResolveUrlService {\n  final Dio _dio;\n  String serverUrl = "http://localhost:8080";\n  ResolveUrlService(this._dio);\n\n  Future<List<VideoSource>> resolve(List<HostLink> urls) async {\n    debugPrint("Resolving URLs: $urls");\n    final validUrls = urls.where((u) => u.url.trim().isNotEmpty).toList();\n    if (validUrls.isEmpty) return [];\n\n    final fallbackSources = validUrls.map((u) {\n      String hostName = "Odtwarzacz (Web)";\n      try {\n        final uri = Uri.parse(u.url);\n        if (uri.host.isNotEmpty) {\n          hostName = "${uri.host.replaceFirst('www.', '').split('.').first.toUpperCase()} (Web)";\n        }\n      } catch (_) {}\n      return VideoSource(url: u.url, lang: u.lang, quality: u.quality, host: hostName, headers: const {"Referer": "https://filman.cc/"});\n    }).toList();\n\n    try {\n      final isUp = await _waitForServer();\n      if (!isUp) {\n        debugPrint("Resolver server not ready, using fallback sources immediately");\n        return fallbackSources;\n      }\n      final response = await _dio.post(\n        "$serverUrl/resolve",\n        data: jsonEncode(validUrls.map((link) => {"url": link.url, "language": link.lang, "quality": link.quality}).toList()),\n        options: Options(headers: {"Content-Type": "application/json"}, connectTimeout: const Duration(seconds: 2), receiveTimeout: const Duration(seconds: 4), sendTimeout: const Duration(seconds: 2), validateStatus: (status) => status != null && status < 500),\n      );\n      if (response.data is List && (response.data as List).isNotEmpty) {\n        final resolved = (response.data as List).map((item) => VideoSource(url: item["url"] ?? "", lang: item["language"] ?? "", quality: item["quality"] ?? "", host: item["host"] ?? "Wideo", headers: item["headers"] != null ? Map<String, String>.from(item["headers"]) : null)).where((s) => s.url.isNotEmpty).toList();\n        if (resolved.isNotEmpty) return resolved;\n      }\n      return fallbackSources;\n    } catch (e) {\n      debugPrint("Error resolving URLs: $e");\n      return fallbackSources;\n    }\n  }\n\n  Future<bool> _waitForServer() async {\n    for (var i = 0; i < 5; i++) {\n      try {\n        final r = await _dio.get("$serverUrl/health", options: Options(connectTimeout: const Duration(milliseconds: 300), receiveTimeout: const Duration(milliseconds: 300), sendTimeout: const Duration(milliseconds: 300), validateStatus: (_) => true));\n        if (r.statusCode == 200) return true;\n      } catch (_) {}\n      await Future.delayed(const Duration(milliseconds: 200));\n    }\n    return false;\n  }\n}\n'''
+          open(p_rus, 'w', encoding='utf-8').write(new_rus)
 
           print('=== 6. Patching player_bloc.dart & player_screen.dart ===')
           p_pb = 'lib/presentation/player/bloc/player_bloc.dart'
           s_pb = open(p_pb, encoding='utf-8').read()
           s_pb = s_pb.replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }')
-          s_pb = s_pb.replace('await _player.open(', "if (event.source.host.contains('(Web)')) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: '')); return; } await _player.open(")
+          s_pb = s_pb.replace('await _player.open(', "Future.delayed(const Duration(seconds: 6), () { if (!isClosed && state.isBuffering) emit(state.copyWith(isBuffering: false, isPlaying: true, displayState: '')); }); if (event.source.host.contains('(Web)')) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: '')); return; } await _player.open(")
           s_pb = s_pb.replace("// Don't emit isPlaying yet - wait for buffering state change\n      emit(state.copyWith(", 'emit(state.copyWith(isBuffering: false, isPlaying: true,')
           open(p_pb, 'w', encoding='utf-8').write(s_pb)
 
@@ -403,6 +401,14 @@ jobs:
           if mdb_old in s_mdb:
               s_mdb = s_mdb.replace(mdb_old, mdb_new)
               open(p_mdb, 'w', encoding='utf-8').write(s_mdb)
+
+          p_main = 'lib/main.dart'
+          s_main = open(p_main, encoding='utf-8').read()
+          old_run = "SeriousPython.run('app/app.zip')"
+          new_run = "try { final sd = await getApplicationSupportDirectory(); final fd = Directory('${sd.path}/flet/app'); if (await fd.exists()) { final hf = File('${fd.path}/.hash'); final ch = (await rootBundle.loadString('app/app.zip.hash')).trim(); final sh = (await hf.exists()) ? (await hf.readAsString()).trim() : ''; if (ch.isNotEmpty && sh != ch) { debugPrint('Upgrading app.zip'); await fd.delete(recursive: true); } } } catch (_) {} SeriousPython.run('app/app.zip')"
+          if old_run in s_main:
+              s_main = "import 'dart:io';\n" + s_main.replace(old_run, new_run)
+              open(p_main, 'w', encoding='utf-8').write(s_main)
 
           print('ALL 7 STEPS AND APP.ZIP REBUILD COMPLETED SUCCESSFULLY!')
           PYEOF
