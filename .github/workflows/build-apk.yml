@@ -371,7 +371,40 @@ jobs:
               s_ts = open(p_ts, encoding='utf-8').read().replace('activeThumbColor:', 'activeColor:')
               open(p_ts, 'w', encoding='utf-8').write(s_ts)
 
-          print('ALL 6 STEPS AND APP.ZIP REBUILD COMPLETED SUCCESSFULLY!')
+          print('=== 7. Patching GoRouter & Search Navigation (/movie?filmweb=true) ===')
+          p_r = 'lib/presentation/global/routes/router.dart'
+          s_r = open(p_r, encoding='utf-8').read()
+          r_old = "path: '/movie/:title',"
+          r_new = "path: '/movie',\n      name: 'movie_details_plain',\n      pageBuilder: (context, state) {\n        return NoTransitionPage(\n          child: state.uri.queryParameters['filmweb'] == 'true'\n              ? MovieDetailsScreen(\n                  filmwebData: state.extra as FilmwebPreviewModel)\n              : MovieDetailsScreen(movie: state.extra as MovieModel),\n        );\n      },\n    ),\n    GoRoute(\n      path: '/movie/:title',"
+          if r_old in s_r:
+              s_r = s_r.replace(r_old, r_new, 1)
+              open(p_r, 'w', encoding='utf-8').write(s_r)
+
+          p_ss = 'lib/presentation/search/screens/search_screen.dart'
+          s_ss = open(p_ss, encoding='utf-8').read()
+          ss_old = "pathParameters: {'title': movie.title},"
+          ss_new = "pathParameters: {'title': Uri.encodeComponent((movie.title.trim().isNotEmpty ? movie.title.trim() : (movie.originalTitle.trim().isNotEmpty ? movie.originalTitle.trim() : 'film')).replaceAll('/', '-'))},"
+          if ss_old in s_ss:
+              s_ss = s_ss.replace(ss_old, ss_new)
+              open(p_ss, 'w', encoding='utf-8').write(s_ss)
+
+          p_fm = 'lib/data/models/filmweb_model.dart'
+          s_fm = open(p_fm, encoding='utf-8').read()
+          fm_old = "title: json['title']?['title'] ?? '',"
+          fm_new = "title: (json['title'] is Map ? (json['title']['title'] ?? '') : (json['title']?.toString() ?? '')).toString().trim().isNotEmpty ? (json['title'] is Map ? (json['title']['title'] ?? '') : (json['title']?.toString() ?? '')).toString().trim() : ((json['originalTitle'] is Map ? (json['originalTitle']['title'] ?? '') : (json['originalTitle']?.toString() ?? '')).toString().trim().isNotEmpty ? (json['originalTitle'] is Map ? (json['originalTitle']['title'] ?? '') : (json['originalTitle']?.toString() ?? '')).toString().trim() : 'Film'),"
+          if fm_old in s_fm:
+              s_fm = s_fm.replace(fm_old, fm_new)
+              open(p_fm, 'w', encoding='utf-8').write(s_fm)
+
+          p_mdb = 'lib/presentation/movie_details/bloc/movie_details_bloc.dart'
+          s_mdb = open(p_mdb, encoding='utf-8').read()
+          mdb_old = 'add(LoadMovieDetails(movie: results.first));'
+          mdb_new = "if (results.isEmpty) { emit(state.copyWith(errorMessage: 'Nie znaleziono wideo dla: ${event.movie.title}', isLoaded: true)); return; } add(LoadMovieDetails(movie: results.first));"
+          if mdb_old in s_mdb:
+              s_mdb = s_mdb.replace(mdb_old, mdb_new)
+              open(p_mdb, 'w', encoding='utf-8').write(s_mdb)
+
+          print('ALL 7 STEPS AND APP.ZIP REBUILD COMPLETED SUCCESSFULLY!')
           PYEOF
 
       - name: Setup Java
