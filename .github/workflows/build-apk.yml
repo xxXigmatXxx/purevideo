@@ -15,10 +15,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Switch to Base Commit & Apply Filman + Player Fixes
+      - name: Apply Filman Login and Player Fixes
         run: |
-          echo "=== 1. Baza 61de1c3 + pliki Filman.cc z 0f94513 ==="
+          echo "=== 1. Przywracanie bazy 61de1c3 ==="
           git checkout -f 61de1c394e8a91fb54b64a650c2d4ca8b4b0cc8e
+
+          echo "=== 2. Pobieranie naprawionego logowania Filman.cc z 0f94513 ==="
           git checkout 0f94513fb6f5ceb0e32b0a32673586cc3e6f5ec2 -- \
             lib/data/models/auth_model.dart \
             lib/data/repositories/filman/filman_auth_repository.dart \
@@ -26,12 +28,118 @@ jobs:
             lib/data/repositories/filman/filman_movie_repository.dart \
             lib/data/repositories/filman/filman_search_repository.dart
 
-          echo "=== 2. Aplikowanie poprawek odtwarzacza i zrodel wideo ==="
-          python3 - << 'PYEOF'
-          import base64
-          data = """IyAxLiBzdXBwb3J0ZWRfZW51bS5kYXJ0IGVraW5vLndzCndpdGggb3BlbignbGliL2NvcmUvdXRpbHMvc3VwcG9ydGVkX2VudW0uZGFydCcsICdyJykgYXMgZjoKICAgIGMgPSBmLnJlYWQoKS5yZXBsYWNlKCdodHRwczovL2VraW5vLXR2LnBsJywgJ2h0dHBzOi8vZWtpbm8ud3MnKQp3aXRoIG9wZW4oJ2xpYi9jb3JlL3V0aWxzL3N1cHBvcnRlZF9lbnVtLmRhcnQnLCAndycpIGFzIGY6CiAgICBmLndyaXRlKGMpCgojIDIuIGVraW5vX21vdmllX3JlcG9zaXRvcnkuZGFydCBla2luby53cyAmIHNlcnZpY2UgZW51bSBidWcKd2l0aCBvcGVuKCdsaWIvZGF0YS9yZXBvc2l0b3JpZXMvZWtpbm8vZWtpbm9fbW92aWVfcmVwb3NpdG9yeS5kYXJ0JywgJ3InKSBhcyBmOgogICAgYyA9IGYucmVhZCgpLnJlcGxhY2UoJ2h0dHBzOi8vZWtpbm8tdHYucGwnLCAnaHR0cHM6Ly9la2luby53cycpLnJlcGxhY2UoJ1N1cHBvcnRlZFNlcnZpY2Uub2JlanJ6eWp0bycsICdTdXBwb3J0ZWRTZXJ2aWNlLmVraW5vJykKd2l0aCBvcGVuKCdsaWIvZGF0YS9yZXBvc2l0b3JpZXMvZWtpbm8vZWtpbm9fbW92aWVfcmVwb3NpdG9yeS5kYXJ0JywgJ3cnKSBhcyBmOgogICAgZi53cml0ZShjKQoKIyAzLiB2aWRlb19zb3VyY2VfcmVwb3NpdG9yeS5kYXJ0IC0gcmVtb3ZlIGRpby5oZWFkIHJlamVjdGlvbgp3aXRoIG9wZW4oJ2xpYi9kYXRhL3JlcG9zaXRvcmllcy92aWRlb19zb3VyY2VfcmVwb3NpdG9yeS5kYXJ0JywgJ3cnKSBhcyBmOgogICAgZi53cml0ZSgnJydpbXBvcnQgJ3BhY2thZ2U6Zmx1dHRlci9tYXRlcmlhbC5kYXJ0JzsKaW1wb3J0ICdwYWNrYWdlOnB1cmV2aWRlby9jb3JlL3ZpZGVvX2hvc3RzL3ZpZGVvX2hvc3RfcmVnaXN0cnkuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vZGF0YS9tb2RlbHMvbW92aWVfbW9kZWwuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vZGkvaW5qZWN0aW9uX2NvbnRhaW5lci5kYXJ0JzsKCmNsYXNzIFZpZGVvU291cmNlUmVwb3NpdG9yeSB7CiAgZmluYWwgVmlkZW9Ib3N0UmVnaXN0cnkgX2hvc3RSZWdpc3RyeSA9IGdldEl0PFZpZGVvSG9zdFJlZ2lzdHJ5PigpOwoKICBGdXR1cmU8TW92aWVEZXRhaWxzTW9kZWw+IHNjcmFwZVZpZGVvVXJscyhNb3ZpZURldGFpbHNNb2RlbCBtb3ZpZSkgYXN5bmMgewogICAgaWYgKG1vdmllLnZpZGVvVXJscyA9PSBudWxsIHx8IG1vdmllLnZpZGVvVXJscyEuaXNFbXB0eSkgcmV0dXJuIG1vdmllOwoKICAgIGZpbmFsIGZ1dHVyZXMgPSBtb3ZpZS52aWRlb1VybHMhLm1hcCgoaG9zdExpbmspIGFzeW5jIHsKICAgICAgdHJ5IHsKICAgICAgICBmaW5hbCBzY3JhcGVyID0gX2hvc3RSZWdpc3RyeS5nZXRTY3JhcGVyRm9yVXJsKGhvc3RMaW5rLnVybCk7CiAgICAgICAgaWYgKHNjcmFwZXIgPT0gbnVsbCkgcmV0dXJuIG51bGw7CgogICAgICAgIGZpbmFsIHZpZGVvU291cmNlID0gYXdhaXQgc2NyYXBlcgogICAgICAgICAgICAuZ2V0VmlkZW9Tb3VyY2UoaG9zdExpbmsudXJsLCBob3N0TGluay5sYW5nLCBob3N0TGluay5xdWFsaXR5KQogICAgICAgICAgICAudGltZW91dChjb25zdCBEdXJhdGlvbihzZWNvbmRzOiAxMCksIG9uVGltZW91dDogKCkgPT4gbnVsbCk7CgogICAgICAgIGlmICh2aWRlb1NvdXJjZSA9PSBudWxsIHx8IHZpZGVvU291cmNlLnVybC5pc0VtcHR5KSByZXR1cm4gbnVsbDsKICAgICAgICByZXR1cm4gdmlkZW9Tb3VyY2U7CiAgICAgIH0gY2F0Y2ggKGUpIHsKICAgICAgICBkZWJ1Z1ByaW50KCdFcnJvciBzY3JhcGluZyAke2hvc3RMaW5rLnVybH06ICRlJyk7CiAgICAgICAgcmV0dXJuIG51bGw7CiAgICAgIH0KICAgIH0pLnRvTGlzdCgpOwoKICAgIGZpbmFsIHJlc3VsdHMgPSBhd2FpdCBGdXR1cmUud2FpdChmdXR1cmVzKTsKICAgIHJldHVybiBtb3ZpZS5jb3B5V2l0aChkaXJlY3RVcmxzOiByZXN1bHRzLndoZXJlVHlwZTxWaWRlb1NvdXJjZT4oKS50b0xpc3QoKSk7CiAgfQp9CicnJykKCiMgNC4gVmlkTmVvIHNjcmFwZXIgKG9iZWpyenlqLnRvKQp3aXRoIG9wZW4oJ2xpYi9jb3JlL3ZpZGVvX2hvc3RzL3NjcmFwZXJzL3ZpZG5lb19zY3JhcGVyLmRhcnQnLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCcnJ2ltcG9ydCAncGFja2FnZTpkaW8vZGlvLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6Zmx1dHRlci9mb3VuZGF0aW9uLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6cHVyZXZpZGVvL2NvcmUvdmlkZW9faG9zdHMvdmlkZW9faG9zdF9zY3JhcGVyLmRhcnQnOwoKY2xhc3MgVmlkTmVvU2NyYXBlciBleHRlbmRzIFZpZGVvSG9zdFNjcmFwZXIgewogIGZpbmFsIERpbyBfZGlvOwogIFZpZE5lb1NjcmFwZXIodGhpc19kaW8pOwoKICBAb3ZlcnJpZGUKICBTdHJpbmcgZ2V0IG5hbWUgPT4gJ1ZpZE5lbyc7CgogIEBvdmVycmlkZQogIExpc3Q8U3RyaW5nPiBnZXQgZG9tYWlucyA9PiBbJ3ZpZG5lby5jYycsICd2aWRuZW8udG8nLCAndmlkbmVvLm5ldCddOwoKICBAb3ZlcnJpZGUKICBGdXR1cmU8VmlkZW9Tb3VyY2U/PiBnZXRWaWRlb1NvdXJjZShTdHJpbmcgdXJsLCBTdHJpbmcgbGFuZywgU3RyaW5nIHF1YWxpdHkpIGFzeW5jIHsKICAgIHRyeSB7CiAgICAgIGZpbmFsIG9yaWdpbiA9ICcke1VyaS5wYXJzZSh1cmwpLnNjaGVtZX06Ly8ke1VyaS5wYXJzZSh1cmwpLmhvc3R9JzsKICAgICAgZmluYWwgcmVzcCA9IGF3YWl0IF9kaW8uZ2V0KHVybCwgb3B0aW9uczogT3B0aW9ucyhoZWFkZXJzOiB7J1JlZmVyZXInOiAnaHR0cHM6Ly9vYmVqcnp5ai50by8nfSkpOwogICAgICBmaW5hbCBtID0gUmVnRXhwKHInKD86c3JjXFxcPyI6XFxcPyJ8c3JjIjoiKShbXiJcXFxdK1xcLm0zdThbXiJcXFxdKiknKS5maXJzdE1hdGNoKHJlc3AuZGF0YS50b1N0cmluZygpKTsKICAgICAgaWYgKG0gIT0gbnVsbCAmJiBtLmdyb3VwKDEpICE9IG51bGwpIHsKICAgICAgICB2YXIgcyA9IG0uZ3JvdXAoMSkhLnJlcGxhY2VBbGwocidcXC8nLCAnLycpOwogICAgICAgIGlmIChzLnN0YXJ0c1dpdGgoJy8nKSkgcyA9ICckb3JpZ2luJHMnOwogICAgICAgIHJldHVybiBWaWRlb1NvdXJjZSh1cmw6IHMsIGxhbmc6IGxhbmcsIHF1YWxpdHk6IHF1YWxpdHksIGhvc3Q6IG5hbWUsIGhlYWRlcnM6IHsnUmVmZXJlcic6IHVybH0pOwogICAgICB9CiAgICB9IGNhdGNoIChlKSB7CiAgICAgIGRlYnVnUHJpbnQoJ1ZpZE5lbyBlcnJvcjogJGUnKTsKICAgIH0KICAgIHJldHVybiBudWxsOwogIH0KfQonJycpCgojIDUuIFZpZGFyYSBzY3JhcGVyIChvYmVqcnp5ai50bykKd2l0aCBvcGVuKCdsaWIvY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy92aWRhcmFfc2NyYXBlci5kYXJ0JywAndycpIGFzIGY6CiAgICBmLndyaXRlKCcnJ2ltcG9ydCAnZGFydDpjb252ZXJ0JzsKaW1wb3J0ICdwYWNrYWdlOmRpby9kaW8uZGFydCc7CmltcG9ydCAncGFja2FnZTpmbHV0dGVyL2ZvdW5kYXRpb24uZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3NjcmFwZXIuZGFydCc7CgpjbGFzcyBWaWRhcmFTY3JhcGVyIGV4dGVuZHMgVmlkZW9Ib3N0U2NyYXBlciB7CiAgZmluYWwgRGlvIF9kaW87CiAgVmlkYXJhU2NyYXBlcih0aGlzLl9kaW8pOwoKICBAb3ZlcnJpZGUKICBTdHJpbmcgZ2V0IG5hbWUgPT4gJ1ZpZGFyYSc7CgogIEBvdmVycmlkZQogIExpc3Q8U3RyaW5nPiBnZXQgZG9tYWlucyA9PiBbJ3ZpZGFyYS50bycsICdzdHJlYW1peC5zbycsICdzdG1peC5pbyddOwoKICBAb3ZlcnJpZGUKICBGdXR1cmU8VmlkZW9Tb3VyY2U/PiBnZXRWaWRlb1NvdXJjZShTdHJpbmcgdXJsLCBTdHJpbmcgbGFuZywgU3RyaW5nIHF1YWxpdHkpIGFzeW5jIHsKICAgIHRyeSB7CiAgICAgIGZpbmFsIG9yaWdpbiA9ICcke1VyaS5wYXJzZSh1cmwpLnNjaGVtZX06Ly8ke1VyaS5wYXJzZSh1cmwpLmhvc3R9JzsKICAgICAgZmluYWwgaWQgPSBVcmkucGFyc2UodXJsKS5wYXRoU2VnbWVudHMud2hlcmUoKHMpID0+IHMuaXNOb3RFbXB0eSkubGFzdDsKICAgICAgZmluYWwgcmVzcCA9IGF3YWl0IF9kaW8ucG9zdCgnJG9yaWdpbi9hcGkvc3RyZWFtJywKICAgICAgICAgIGRhdGE6IGpzb25FbmNvZGUoeydmaWxlY29kZSc6IGlkLCAnZGV2aWNlJzogJ3dlYid9KSwKICAgICAgICAgIG9wdGlvbnM6IE9wdGlvbnMoaGVhZGVyczogeydSZZmVyZXInOiB1cmwsICdPcmlnaW4nOiBvcmlnaW4sICdDb250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbid9KSk7CiAgICAgIGZpbmFsIGRhdGEgPSByZXNwLmRhdGEgaXMgU3RyaW5nID8ganNvbkRlY29kZShyZXNwLmRhdGEpIDogcmVzcC5kYXRhOwogICAgICBpZihkYXRhIGlzIE1hcCAmJiBkYXRhWydzdHJlYW1pbmdfdXJsJ10gIT0gbnVsbCkgewogICAgICAgIHJldHVybiBWaWRlb1NvdXJjZSh1cmw6IGRhdGFbJ3N0cmVhbWluZ191cmwnXS50b1N0cmluZygpLCBsYW5nOiBsYW5nLCBxdWFsaXR5OiBxdWFsaXR5LCBob3N0OiBuYW1lLCBoZWFkZXJzOiB7J1JlZmVyZXInOiAnJG9yaWdpbi8nfSk7CiAgICAgIH0KICAgIH0gY2F0Y2ggKGUpIHsKICAgICAgZGVidWdQcmludCgnVmlkYXJhIGVycm9yOiAkZScpOwogICAgfQogICAgcmV0dXJuIG51bGw7CiAgfQp9CicnJykKCiMgNi4gVk9FIHNjcmFwZXIgKDIwMjYgTFVUICsgYmFzZTY0KQp3aXRoIG9wZW4oJ2xpYi9jb3JlL3ZpZGVvX2hvc3RzL3NjcmFwZXJzL3ZvZV9zY3JhcGVyLmRhcnQnLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCcnJ2ltcG9ydCAnZGFydDpjb252ZXJ0JzsKaW1wb3J0ICdwYWNrYWdlOmRpby9kaW8uZGFydCc7CmltcG9ydCAncGFja2FnZTpmbHV0dGVyL2ZvdW5kYXRpb24uZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3NjcmFwZXIuZGFydCc7CgpjbGFzcyBWb2VTY3JhcGVyIGV4dGVuZHMgVmlkZW9Ib3N0U2NyYXBlciB7CiAgZmluYWwgRGlvIF9kaW87CiAgVm9lU2NyYXBlcih0aGlzLl9kaW8pOwoKICBAb3ZlcnJpZGUKICBTdHJpbmcgZ2V0IG5hbWUgPT4gJ1ZPRSc7CgogIEBvdmVycmlkZQogIExpc3Q8U3RyaW5nPiBnZXQgZG9tYWlucyA9PiBbCiAgICAgICAgJ3ZvZS5zeCcsICd2b2UtdW5ibG9jay5jb20nLCAndm9lLXVuYmxvY2submV0JywgJ3ZvZXVuYmxvY2suY29tJywKICAgICAgICAnam9uYXRoYW5zb2NpYWxsaWtlLmNvbScsICdsdWtlY29tcGFyZXR3by5jb20nLCAnc21va2kuY2MnLCAnb2dsYWRhai5tZScsCiAgICAgICAgJ3dvbGZkeXNsZWN0aWMuY29tJywgJ3ZhbGVyb25ldmlqYW8uY29tJywgJ2dvb2Z5LWJhbmFuYS5jb20nLAogICAgICAgICdjcmlzdGlhbmVmcm9nLmNvbScsICdhbGVqYW5kcm9jZW50dXJ5LmNvbScKICAgICAgXTsKCiAgQG92ZXJyaWRlCiAgRnV0dXJlPFZpZGVvU291cmNlPz4gZ2V0VmlkZW9Tb3VyY2UoU3RyaW5nIHVybCwgU3RyaW5nIGxhbmcsIFN0cmluZyBxdWFsaXR5KSBhc3luYyB7CiAgICB0cnkgewogICAgICB2YXIgY3VycmVudFVybCA9IHVybDsKICAgICAgdmFyIHJlc3AgPSBhd2FpdCBfZGlvLmdldChjdXJyZW50VXJsKTsKICAgICAgdmFyIGh0bWwgPSByZXNwLmRhdGEudG9TdHJpbmcoKTsKICAgICAgZmluYWwgcmVkaXIgPSBSZWdFeHAocid3aW5kb3dcLmxvY2F0aW9uXC5ocmVmXHMqPVxzKlsnXFwiXShbXidaXFwiXSspWydcXCJdJykuZmlyc3RNYXRjaChodG1sKTsKICAgICAgaWYgKHJlZGlyICE9IG51bGwpIHsKICAgICAgICBjdXJyZW50VXJsID0gcmVkaXIuZ3JvdXAoMSkhOwogICAgICAgIHJlc3AgPSBhd2FpdCBfZGlvLmdldChjdXJyZW50VXJsLCBvcHRpb25zOiBPcHRpb25zKGhlYWRlcnM6IHsnUmVmZXJlcic6IHVybH0pKTsKICAgICAgICBodG1sID0gcmVzcC5kYXRhLnRvU3RyaW5nKCk7CiAgICAgIH0KICAgICAgZmluYWwganNvblNjcmlwdCA9IFJlZ0V4cChyJ2pzb24iPlxcWyIoW14iXSspIlxcXTwvc2NyaXB0Plxccyo8c2NyaXB0XFxzKnNyYz0iKFteIl0rKSInKS5maXJzdE1hdGNoKGh0bWwpOwogICAgICBpZiAoanNvblNjcmlwdCAhPSBudWxsKSB7CiAgICAgICAgZmluYWwgY3QgPSBqc29uU2NyaXB0Lmdyb3VwKDEpITsKICAgICAgICBmaW5hbCBzVXJsID0gVXJpLnBhcnNlKGN1cnJlbnRVcmwpLnJlc29sdmUoanNvblNjcmlwdC5ncm91cCgyKSEpLnRvU3RyaW5nKCk7CiAgICAgICAgZmluYWwgc0h0bWwgPSAoYXdhaXQgX2Rpby5nZXQoc1VybCwgb3B0aW9uczogT3B0aW9ucyhoZWFkZXJzOiB7J1JlZmVyZXInOiBjdXJyZW50VXJsfSkpKS5kYXRhLnRvU3RyaW5nKCk7CiAgICAgICAgZmluYWwgcmVwbCA9IFJlZ0V4cChyIihcXFsoPzonXFxXezJ9J1ssXFxdXSl7MSw5fSkiKS5maXJzdE1hdGNoKHNIdG1sKTsKICAgICAgICBpZiAocmVwbCAhPSBudWxsKSB7CiAgICAgICAgICBmaW5hbCBsdXRzID0gcmVwbC5ncm91cCgxKSEuc3Vic3RyaW5nKDIsIHJlcGwuZ3JvdXAoMSkhLmxlbmd0aCAtIDIpLnNwbGl0KCInLCciKTsKICAgICAgICAgIGZpbmFsIGJ1ZiA9IFN0cmluZ0J1ZmZlcigpOwogICAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBjdC5sZW5ndGg7IGkrKykgewogICAgICAgICAgICBpbnQgeCA9IGN0LmNvZGVVbml0QXQoaSk7CiAgICAgICAgICAgIGlmICh4ID4gNjQgJiYgeCA8IDkxKSBidWYud3JpdGVDaGFyQ29kZSgoeCAtIDUyKSAlIDI2ICsgNjUpOwogICAgICAgICAgICBlbHNlIGlmICh4ID4gOTYgJiYgeCA8IDEyMykgYnVmLndyaXRlQ2hhckNvZGUoKHggLSA4NCkgJSAyNiArIDk3KTsKICAgICAgICAgICAgZWxzZSBidWYud3JpdGVDaGFyQ29kZSh4KTsKICAgICAgICAgIH0KICAgICAgICAgIHZhciB0eHQgPSBidWYudG9TdHJpbmcoKTsKICAgICAgICAgIGZvciAoZmluYWwgcCBpbiBsdXRzKSB0eHQgPSB0eHQucmVwbGFjZUFsbChwLCAnJyk7CiAgICAgICAgICBmaW5hbCBkZWMxID0gbGF0aW4xLmRlY29kZShiYXNlNjREZWNvZGUoYmFzZTY0Lm5vcm1hbGl6ZSh0eHQpKSk7CiAgICAgICAgICBmaW5hbCBzaGlmdGVkID0gU3RyaW5nLmZyb21DaGFyQ29kZXMoZGVjMS5jb2RlVW5pdHMubWFwKChjKSA9PiBjIC0gMykpLnNwbGl0KCcnKS5yZXZlcnNlZC5qb2luKCk7CiAgICAgICAgICBmaW5hbCBkYXRhID0ganNvbkRlY29kZSh1dGY4LmRlY29kZShiYXNlNjREZWNvZGUoYmFzZTY0Lm5vcm1hbGl6ZShzaGlmdGVkKSksIGFsbG93TWFsZm9ybWVkOiB0cnVlKSk7CiAgICAgICAgICBmaW5hbCBzdHJlYW0gPSAoZGF0YVsnd291cmNlJ10gPz8gZGF0YVsndGlsZSddID8/IGRhdGFbJ2RpcmVjdF9hY2Nlc3NfdXJsJ10pPy50b1N0cmluZygpOwogICAgICAgICAgaWYgKHN0cmVhbSAhPSBudWxsICYmIHN0cmVhbS5pc05vdEVtcHR5KSB7CiAgICAgICAgICAgIHJldHVybiBWaWRlb1NvdXJjZSh1cmw6IHN0cmVhbSwgbGFuZzogbGFuZywgcXVhbGl0eTogcXVhbGl0eSwgaG9zdDogbmFtZSwgaGVhZGVyczogeydSZZmVyZXInOiBjdXJyZW50VXJsfSk7CiAgICAgICAgICB9CiAgICAgICAgfQogICAgICB9CiAgICAgIGZvciAoZmluYWwgcCBpbiBbclsiJ1xcIl1obHNbIydcXCJdXFxzKjpcXHMrWydcXCJdKFteJ1xcIl0rKVsJclxcIl0iLCByIlsnXFwiXW1wNFsnXFwiXVxccyo6XFxzKlsnXFwiXShbXidaXFwiXSspWydcXCJdIl0pIHsKICAgICAgICBmaW5hbCBtID0gUmVnRXhwKHApLmZpcnN0TWF0Y2goaHRtbCk7CiAgICAgICAgaWYgKG0gIT0gbnVsbCkgewogICAgICAgICAgdmFyIGNhbmQgPSBtLmdyb3VwKDEpITsKICAgICAgICAgIGlmICghY2FuZC5zdGFydHNXaXRoKCdodHRwJykpIHsKICAgICAgICAgICAgdHJ5IHsgY2FuZCA9IHV0ZjguZGVjb2RlKGJhc2U2NERlY29kZShiYXNlNjQubm9ybWFsaXplKGNhbmQpKSk7IH0gY2F0Y2ggKF8pIHt9CiAgICAgICAgICB9CiAgICAgICAgICBpZiAoY2FuZC5zdGFydHNXaXRoKCdodHRwJykpIHsKICAgICAgICAgICAgcmV0dXJuIFZpZGVvU291cmNlKHVybDogY2FuZCwgbGFuZzogbGFuZywgcXVhbGl0eTogcXVhbGl0eSwgaG9zdDogbmFtZSwgaGVhZGVyczogeydSZZmVyZXInOiBjdXJyZW50VXJsfSk7CiAgICAgICAgICB9CiAgICAgICAgfQogICAgICB9CiAgICB9IGNhdGNoIChlKSB7CiAgICAgIGRlYnVnUHJpbnQoJ1ZPRSBlcnJvcjogJGUnKTsKICAgIH0KICAgIHJldHVybiBudWxsOwogIH0KfQonJycpCgojIDcudmlkZW9faG9zdHNfY29udGFpbmVyLmRhcnQgcmVnaXN0cmF0aW9uCndpdGggb3BlbignbGliL2RpL3ZpZGVvX2hvc3RzX2NvbnRhaW5lci5kYXJ0JywAndycpIGFzIGY6CiAgICBmLndyaXRlKCcnJ2ltcG9ydCAnZGFydDppbyc7CmltcG9ydCAncGFja2FnZTpkaW8vZGlvLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6ZGlvL2lvLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6cHVyZXZpZGVvL2NvcmUvdmlkZW9faG9zdHMvc2NyYXBlcnMvZG9vZHN0cmVhbV9zY3JhcGVyLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6cHVyZXZpZGVvL2NvcmUvdmlkZW9faG9zdHMvc2NyYXBlcnMvZWtpbm9fc2NyYXBlci5kYXJ0JzsKaW1wb3J0ICdwYWNrYWdlOnB1cmV2aWRlby9jb3JlL3ZpZGVvX2hvc3RzL3NjcmFwZXJzL2ZpbGVtb29uX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy9raW5vZ2VyX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy9sdWx1c3RyZWFtX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy9zdHJlYW1ydWJ5X3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy9zdHJlYW10YXBlX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy92aWRhcmFfc2NyYXBlci5kYXJ0JzsKaW1wb3J0ICdwYWNrYWdlOnB1cmV2aWRlby9jb3JlL3ZpZGVvX2hvc3RzL3NjcmFwZXJzL3ZpZG5lb19zY3JhcGVyLmRhcnQnOwppbXBvcnQgJ3BhY2thZ2U6cHVyZXZpZGVvL2NvcmUvdmlkZW9faG9zdHMvc2NyYXBlcnMvdmlkb3phX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy9zY3JhcGVycy92b2Vfc2NyYXBlci5kYXJ0JzsKaW1wb3J0ICdwYWNrYWdlOnB1cmV2aWRlby9jb3JlL3ZpZGVvX2hvc3RzL3NjcmFwZXJzL3Z0dWJlX3NjcmFwZXIuZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3JlZ2lzdHJ5LmRhcnQnOwoKY2xhc3MgVmlkZW9Ib3N0c0NvbnRhaW5lciB7CiAgc3RhdGljIHZvaWQgcmVnaXN0ZXJWaWRlb1NjcmFwZXJzKFZpZGVvSG9zdFJlZ2lzdHJ5IHJlZ2lzdHJ5KSB7CiAgICBmaW5hbCBEaW8gZGlvID0gRGlvKAogICAgICBCYXNlT3B0aW9ucygKICAgICAgICBjb25uZWN0VGltZW91dDogY29uc3QgRHVyYXRpb24oc2Vjb25kczogOCksCiAgICAgICAgcmVjZWl2ZVRpbWVvdXQ6IGNvbnN0IER1cmF0aW9uKHNlY29uZHM6IDgpLAogICAgICAgIHNlbmRUaW1lb3V0OiBjb25zdCBEdXJhdGlvbihzZWNvbmRzOiA4KSwKICAgICAgICB2YWxpZGF0ZVN0YXR1czogKHN0YXR1cykgPT4gdHJ1ZSwKICAgICAgKSwKICAgICk7CiAgICBmaW5hbCBpb2MgPSBIdHRwQ2xpZW50KCk7CiAgICBpb2MuYmFkQ2VydGlmaWNhdGVDYWxsYmFjayA9IChYNTA5Q2VydGlmaWNhdGUgY2VydCwgU3RyaW5nIGhvc3QsIGludCBwb3J0KSA9PiB0cnVlOwogICAgZGlvLmh0dHBDbGllbnRBZGFwdGVyID0gSU9IdHRwQ2xpZW50QWRhcHRlcigKICAgICAgY3JlYXRlSHR0cENsaWVudDogKCkgPT4gaW9jLAogICAgKTsKCiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoVmlkTmVvU2NyYXBlcihkaW8pKTsKICAgIHJlZ2lzdHJ5LnJlZ2lzdGVyU2NyYXBlcihWaWRhcmFTY3JhcGVyKGRpbykpOwogICAgcmVnaXN0cnkucmVnaXN0ZXJTY3JhcGVyKFZvZVNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoU3RyZWFtdGFwZVNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoVmlkb3phU2NyYXBlcihkaW8pKTsKICAgIHJlZ2lzdHJ5LnJlZ2lzdGVyU2NyYXBlcihEb29kU3RyZWFtU2NyYXBlcihkaW8pKTsKICAgIHJlZ2lzdHJ5LnJlZ2lzdGVyU2NyYXBlcihWdHViZVNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoS2lub0dlclNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoTHVsdVN0cmVhbVNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoU3RyZWFtcnVieVNjcmFwZXIoZGlvKSk7CiAgICByZWdpc3RyeS5yZWdpc3RlclNjcmFwZXIoRWtpbm9TY3JhcGVyKCkpOwogICAgcmVnaXN0cnkucmVnaXN0ZXJTY3JhcGVyKEZpbGVNb29uU2NyYXBlcihkaW8pKTsKICB9Cn0KJycnKQoKIyA4LiB2aWRlb19ob3N0X3JlZ2lzdHJ5LmRhcnQgZmFsbGJhY2sgdG8gVk9FIGZvciAvZS8Kd2l0aCBvcGVuKCdsaWIvY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3JlZ2lzdHJ5LmRhcnQnLCAndycpIGFzIGY6CiAgICBmLndyaXRlKCcnJ2ltcG9ydCAncGFja2FnZTpjb2xsZWN0aW9uL2NvbGxlY3Rpb24uZGFydCc7CmltcG9ydCAncGFja2FnZTpwdXJldmlkZW8vY29yZS92aWRlb19ob3N0cy92aWRlb19ob3N0X3NjcmFwZXIuZGFydCc7CgpjbGFzcyBWaWRlb0hvc3RSZWdpc3RyeSB7CiAgZmluYWwgTGlzdDxWaWRlb0hvc3RTY3JhcGVyPiBfc2NyYXBlcnMgPSBbXTsKCiAgdm9pZCByZWdpc3RlclNjcmFwZXIoVmlkZW9Ib3N0U2NyYXBlciBzY3JhcGVyKSB7CiAgICBfc2NyYXBlcnMuYWRkKHNjcmFwZXIpOwogIH0KCICBWaWRlb0hvc3RTY3JhcGVyPyBnZXRTY3JhcGVyRm9yVXJsKFN0cmluZyB1cmwpIHsKICAgIGZpbmFsIGV4YWN0ID0gX3NjcmFwZXJzLmZpcnN0V2hlcmVPck51bGwoKHMpID0+IHMuY2FuSGFuZGxlKHVybCkpOwogICAgaWYgKGV4YWN0ICE9IG51bGwpIHJldHVybiBleGFjdDsKICAgIGlmICh1cmwuY29udGFpbnMoJy9lLycpKSB7CiAgICAgIHJldHVybiBfc2NyYXBlcnMuZmlyc3RXaGVyZU9yTnVsbCgocykgPT4gcy5uYW1lID09ICdWT0UnKTsKICAgIH0KICAgIHJldHVybiBudWxsOwogIH0KCICBib29sIGlzSG9zdFN1cHBvcnRlZChTdHJpbmcgdXJsKSA9PiBnZXRTY3JhcGVyRm9yVXJsKHVybCkgIT0gbnVsbDsKICBMaXN0PFZpZGVvSG9zdFNjcmFwZXI+IGdldCBzY3JhcGVycyA9PiBMaXN0LnVubW9kaWZpYWJsZShfc2NyYXBlcnMpOwp9CicnJykK"""
-          exec(base64.b64decode(data).decode('utf-8'))
-          PYEOF
+          echo "=== 3. Aplikowanie poprawek odtwarzacza wideo ==="
+          cat << 'PYEOF' > patch_app.py
+import os, json
+
+# 1. Domena ekino.ws
+for p in ['lib/core/utils/supported_enum.dart', 'lib/data/repositories/ekino/ekino_movie_repository.dart']:
+    with open(p, 'r') as f:
+        c = f.read().replace('https://ekino-tv.pl', 'https://ekino.ws').replace('SupportedService.obejrzyjto', 'SupportedService.ekino')
+    with open(p, 'w') as f:
+        f.write(c)
+
+# 2. Usuniecie head check z video_source_repository.dart
+with open('lib/data/repositories/video_source_repository.dart', 'r') as f:
+    c = f.read().replace('if (response.statusCode != 200) continue;', '// accept stream directly')
+with open('lib/data/repositories/video_source_repository.dart', 'w') as f:
+    f.write(c)
+
+# 3. Dynamiczne dociaganie zrodel w player_bloc.dart
+p_player = 'lib/presentation/player/bloc/player_bloc.dart'
+with open(p_player, 'r') as f:
+    c = f.read().replace(
+        'movieDetails = _movie!;\n        // await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc',
+        'movieDetails = _movie!;\n        if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) {\n          movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!);\n        }'
+    )
+with open(p_player, 'w') as f:
+    f.write(c)
+
+# 4. Scraper VidNeo (vidneo.cc)
+with open('lib/core/video_hosts/scrapers/vidneo_scraper.dart', 'w') as f:
+    f.write('''import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
+
+class VidNeoScraper extends VideoHostScraper {
+  final Dio _dio;
+  VidNeoScraper(this._dio);
+
+  @override
+  String get name => 'VidNeo';
+
+  @override
+  List<String> get domains => ['vidneo.cc', 'vidneo.to', 'vidneo.net'];
+
+  @override
+  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
+    try {
+      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
+      final resp = await _dio.get(url, options: Options(headers: {'Referer': 'https://obejrzyj.to/'}));
+      final m = RegExp(r'(?:src\\\\?":\\\\?"|src":")([^"\\\\]+\\.m3u8[^"\\\\]*)').firstMatch(resp.data.toString());
+      if (m != null && m.group(1) != null) {
+        var s = m.group(1)!.replaceAll(r'\\/', '/');
+        if (s.startsWith('/')) s = '$origin$s';
+        return VideoSource(url: s, lang: lang, quality: quality, host: name, headers: {'Referer': url});
+      }
+    } catch (e) {
+      debugPrint('VidNeo error: $e');
+    }
+    return null;
+  }
+}
+''')
+
+# 5. Scraper Vidara (vidara.to)
+with open('lib/core/video_hosts/scrapers/vidara_scraper.dart', 'w') as f:
+    f.write('''import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
+
+class VidaraScraper extends VideoHostScraper {
+  final Dio _dio;
+  VidaraScraper(this._dio);
+
+  @override
+  String get name => 'Vidara';
+
+  @override
+  List<String> get domains => ['vidara.to', 'streamix.so', 'stmix.io'];
+
+  @override
+  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
+    try {
+      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
+      final id = Uri.parse(url).pathSegments.where((s) => s.isNotEmpty).last;
+      final resp = await _dio.post('$origin/api/stream',
+          data: jsonEncode({'filecode': id, 'device': 'web'}),
+          options: Options(headers: {'Referer': url, 'Origin': origin, 'Content-Type': 'application/json'}));
+      final data = resp.data is String ? jsonDecode(resp.data) : resp.data;
+      if (data is Map && data['streaming_url'] != null) {
+        return VideoSource(url: data['streaming_url'].toString(), lang: lang, quality: quality, host: name, headers: {'Referer': '$origin/'});
+      }
+    } catch (e) {
+      debugPrint('Vidara error: $e');
+    }
+    return null;
+  }
+}
+''')
+
+# 6. Rejestracja w video_hosts_container.dart
+with open('lib/di/video_hosts_container.dart', 'r') as f:
+    c = f.read()
+if 'VidNeoScraper' not in c:
+    c = "import 'package:purevideo/core/video_hosts/scrapers/vidneo_scraper.dart';\nimport 'package:purevideo/core/video_hosts/scrapers/vidara_scraper.dart';\n" + c
+    c = c.replace('registry.registerScraper(StreamtapeScraper(dio));', 'registry.registerScraper(StreamtapeScraper(dio));\n    registry.registerScraper(VidNeoScraper(dio));\n    registry.registerScraper(VidaraScraper(dio));')
+    with open('lib/di/video_hosts_container.dart', 'w') as f:
+        f.write(c)
+
+print("Patch applied successfully!")
+PYEOF
+          python3 patch_app.py
+          rm -f patch_app.py
 
       - name: Setup Java
         uses: actions/setup-java@v4
