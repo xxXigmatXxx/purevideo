@@ -17,480 +17,330 @@ jobs:
 
       - name: Switch to Base Commit & Apply Filman + Player Fixes
         run: |
-          echo "=== 1. Baza 61de1c3 + poprawka logowania Filman.cc z 0f94513 ==="
+          echo "=== 1. Baza 61de1c3 + pliki Filman.cc z 0f94513 ==="
           git checkout -f 61de1c394e8a91fb54b64a650c2d4ca8b4b0cc8e
           git checkout 0f94513fb6f5ceb0e32b0a32673586cc3e6f5ec2 -- \
             lib/data/models/auth_model.dart \
             lib/data/repositories/filman/filman_auth_repository.dart \
             lib/data/repositories/filman/filman_dio_factory.dart \
+            lib/data/repositories/filman/filman_movie_repository.dart \
             lib/data/repositories/filman/filman_search_repository.dart
 
-          echo "=== 2. Aktualizacja odtwarzacza i scraperów wideo (2026) ==="
-          cat << 'EOF' > apply_fixes.py
-          import os
+          echo "=== 2. Naprawa odtwarzacza i scraperow wideo ==="
+          cat << 'PYEOF' > patch_app.py
+# 1. supported_enum.dart ekino.ws
+with open('lib/core/utils/supported_enum.dart', 'r') as f:
+    c = f.read().replace('https://ekino-tv.pl', 'https://ekino.ws')
+with open('lib/core/utils/supported_enum.dart', 'w') as f:
+    f.write(c)
 
-          # 1. Domena Ekino (ekino.ws)
-          for p in ['lib/core/utils/supported_enum.dart', 'lib/data/repositories/ekino/ekino_movie_repository.dart']:
-              with open(p, 'r', encoding='utf-8') as f:
-                  c = f.read()
-              c = c.replace('https://ekino-tv.pl', 'https://ekino.ws')
-              c = c.replace('if (auth.service == SupportedService.obejrzyjto)', 'if (auth.service == SupportedService.ekino)')
-              with open(p, 'w', encoding='utf-8') as f:
-                  f.write(c)
+# 2. ekino_movie_repository.dart ekino.ws & service enum bug
+with open('lib/data/repositories/ekino/ekino_movie_repository.dart', 'r') as f:
+    c = f.read().replace('https://ekino-tv.pl', 'https://ekino.ws').replace('SupportedService.obejrzyjto', 'SupportedService.ekino')
+with open('lib/data/repositories/ekino/ekino_movie_repository.dart', 'w') as f:
+    f.write(c)
 
-          # 2. Obejrzyj.to - domyślne wartości jakości/języka
-          p_obej = 'lib/data/repositories/obejrzyjto/obejrzyjto_movie_repository.dart'
-          with open(p_obej, 'r', encoding='utf-8') as f:
-              c = f.read()
-          c = c.replace("final quality = video['quality'] as String?;", "final quality = (video['quality'] as String?) ?? '1080p';")
-          c = c.replace("final lang = video['language'] as String?;", "final lang = (video['language'] as String?) ?? 'pl';")
-          with open(p_obej, 'w', encoding='utf-8') as f:
-              f.write(c)
+# 3. video_source_repository.dart - remove dio.head rejection
+with open('lib/data/repositories/video_source_repository.dart', 'w') as f:
+    f.write('''import 'package:flutter/material.dart';
+import 'package:purevideo/core/video_hosts/video_host_registry.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
+import 'package:purevideo/data/models/movie_model.dart';
+import 'package:purevideo/di/injection_container.dart';
 
-          # 3. FilmanMovieRepository - dekodowanie tmp-url.pro (XOR + JSON/URL) równolegle
-          with open('lib/data/repositories/filman/filman_movie_repository.dart', 'w', encoding='utf-8') as f:
-              f.write(r"""import 'dart:convert';
+class VideoSourceRepository {
+  final VideoHostRegistry _hostRegistry = getIt<VideoHostRegistry>();
 
-          import 'package:dio/dio.dart';
-          import 'package:flutter/material.dart';
-          import 'package:purevideo/core/utils/supported_enum.dart';
-          import 'package:purevideo/data/models/link_model.dart';
-          import 'package:purevideo/data/models/movie_model.dart';
-          import 'package:purevideo/data/models/auth_model.dart';
-          import 'package:purevideo/data/repositories/auth_repository.dart';
-          import 'package:purevideo/data/repositories/filman/filman_dio_factory.dart';
-          import 'package:purevideo/data/repositories/movie_repository.dart';
-          import 'package:html/parser.dart' as html;
-          import 'package:html/dom.dart' as dom;
-          import 'package:purevideo/di/injection_container.dart';
+  Future<MovieDetailsModel> scrapeVideoUrls(MovieDetailsModel movie) async {
+    if (movie.videoUrls == null || movie.videoUrls!.isEmpty) return movie;
 
-          class FilmanMovieRepository implements MovieRepository {
-            final AuthRepository _authRepository =
-                getIt<Map<SupportedService, AuthRepository>>()[SupportedService.filman]!;
-            Dio? _dio;
+    final futures = movie.videoUrls!.map((hostLink) async {
+      try {
+        final scraper = _hostRegistry.getScraperForUrl(hostLink.url);
+        if (scraper == null) return null;
 
-            FilmanMovieRepository() {
-              _authRepository.authStream.listen(_onAuthChanged);
-            }
+        final videoSource = await scraper
+            .getVideoSource(hostLink.url, hostLink.lang, hostLink.quality)
+            .timeout(const Duration(seconds: 10), onTimeout: () => null);
 
-            void _onAuthChanged(AuthModel auth) {
-              if (auth.service == SupportedService.filman) {
-                _dio = FilmanDioFactory.getDio(auth.account);
-              }
-            }
+        if (videoSource == null || videoSource.url.isEmpty) return null;
+        return videoSource;
+      } catch (e) {
+        debugPrint('Error scraping ${hostLink.url}: $e');
+        return null;
+      }
+    }).toList();
 
-            Future<void> _prepareDio() async {
-              if (_dio == null) {
-                final account = _authRepository.getAccount();
-                _dio = FilmanDioFactory.getDio(account);
-              }
-            }
+    final results = await Future.wait(futures);
+    return movie.copyWith(directUrls: results.whereType<VideoSource>().toList());
+  }
+}
+''')
 
-            String _cleanExtractedUrl(String raw) {
-              String s = raw.trim();
-              if (s.startsWith('{')) {
-                try {
-                  final decodedJson = jsonDecode(s);
-                  if (decodedJson is Map && decodedJson['src'] != null) {
-                    s = decodedJson['src'].toString().trim();
-                  }
-                } catch (_) {}
-              }
-              return s;
-            }
+# 4. VidNeo scraper (obejrzyj.to)
+with open('lib/core/video_hosts/scrapers/vidneo_scraper.dart', 'w') as f:
+    f.write('''import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
 
-            Future<String> _resolveTempUrl(String tempUrl) async {
-              try {
-                final response = await Dio(BaseOptions(
-                  connectTimeout: const Duration(seconds: 6),
-                  receiveTimeout: const Duration(seconds: 6),
-                )).get(
-                  tempUrl,
-                  options: Options(
-                    followRedirects: false,
-                    validateStatus: (_) => true,
-                    headers: {
-                      'User-Agent':
-                          'Mozilla/5.0 (Linux; Android 16; Pixel 8 Build/BP31.250610.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36',
-                      'Referer': 'https://filman.cc/',
-                    },
-                  ),
-                );
+class VidNeoScraper extends VideoHostScraper {
+  final Dio _dio;
+  VidNeoScraper(this._dio);
 
-                final loc = response.headers.value('location');
-                if (loc != null && loc.isNotEmpty && !loc.contains('tmp-url.pro')) {
-                  return _cleanExtractedUrl(loc);
-                }
+  @override
+  String get name => 'VidNeo';
 
-                final String body = response.data.toString();
+  @override
+  List<String> get domains => ['vidneo.cc', 'vidneo.to', 'vidneo.net'];
 
-                final regExp = RegExp(r'''var _e\s*=\s*['"]([A-Za-z0-9+/=]+)['"]''');
-                final regExpA = RegExp(r'''var _a\s*=\s*['"]([^'"]+)['"]''');
-                final regExpB = RegExp(r'''var _b\s*=\s*['"]([^'"]+)['"]''');
-                final regExpC = RegExp(r'''var _c\s*=\s*['"]([^'"]+)['"]''');
+  @override
+  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
+    try {
+      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
+      final resp = await _dio.get(url, options: Options(headers: {'Referer': 'https://obejrzyj.to/'}));
+      final m = RegExp(r'(?:src\\\\?":\\\\?"|src":")([^"\\\\]+\\.m3u8[^"\\\\]*)').firstMatch(resp.data.toString());
+      if (m != null && m.group(1) != null) {
+        var s = m.group(1)!.replaceAll(r'\\/', '/');
+        if (s.startsWith('/')) s = '$origin$s';
+        return VideoSource(url: s, lang: lang, quality: quality, host: name, headers: {'Referer': url});
+      }
+    } catch (e) {
+      debugPrint('VidNeo error: $e');
+    }
+    return null;
+  }
+}
+''')
 
-                final matchE = regExp.firstMatch(body);
-                final matchA = regExpA.firstMatch(body);
-                final matchB = regExpB.firstMatch(body);
-                final matchC = regExpC.firstMatch(body);
+# 5. Vidara scraper (obejrzyj.to)
+with open('lib/core/video_hosts/scrapers/vidara_scraper.dart', 'w') as f:
+    f.write('''import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
 
-                if (matchE != null &&
-                    matchA != null &&
-                    matchB != null &&
-                    matchC != null) {
-                  final String encoded = matchE.group(1)!;
-                  final String key =
-                      matchA.group(1)! + matchB.group(1)! + matchC.group(1)!;
+class VidaraScraper extends VideoHostScraper {
+  final Dio _dio;
+  VidaraScraper(this._dio);
 
-                  try {
-                    final List<int> raw = base64.decode(base64.normalize(encoded));
-                    final List<int> keyBytes = key.codeUnits;
-                    final String result = String.fromCharCodes(
-                      List.generate(
-                          raw.length, (i) => raw[i] ^ keyBytes[i % keyBytes.length]),
-                    );
-                    return _cleanExtractedUrl(result);
-                  } catch (e) {
-                    debugPrint('XOR decode failed: $e');
-                    return '';
-                  }
-                }
-                return '';
-              } catch (e) {
-                debugPrint('Failed to resolve temp URL: $tempUrl - $e');
-                return tempUrl;
-              }
-            }
+  @override
+  String get name => 'Vidara';
 
-            Future<List<HostLink>> _extractHostLinksFromDocument(
-                dom.Document document) async {
-              final rows = document.querySelectorAll('tbody tr');
-              final futures = rows.map((row) async {
-                String? link;
-                try {
-                  final rawIframe =
-                      row.querySelector('a[data-iframe]')?.attributes['data-iframe'] ??
-                          row.querySelector('td a')?.attributes['data-iframe'] ??
-                          '';
-                  if (rawIframe.isEmpty) return null;
-                  final decoded = base64Decode(base64.normalize(rawIframe.trim()));
-                  link = _cleanExtractedUrl(utf8.decode(decoded, allowMalformed: true));
-                } catch (e) {
-                  link = null;
-                }
+  @override
+  List<String> get domains => ['vidara.to', 'streamix.so', 'stmix.io'];
 
-                if (link == null || link.isEmpty) return null;
+  @override
+  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
+    try {
+      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
+      final id = Uri.parse(url).pathSegments.where((s) => s.isNotEmpty).last;
+      final resp = await _dio.post('$origin/api/stream',
+          data: jsonEncode({'filecode': id, 'device': 'web'}),
+          options: Options(headers: {'Referer': url, 'Origin': origin, 'Content-Type': 'application/json'}));
+      final data = resp.data is String ? jsonDecode(resp.data) : resp.data;
+      if (data is Map && data['streaming_url'] != null) {
+        return VideoSource(url: data['streaming_url'].toString(), lang: lang, quality: quality, host: name, headers: {'Referer': '$origin/'});
+      }
+    } catch (e) {
+      debugPrint('Vidara error: $e');
+    }
+    return null;
+  }
+}
+''')
 
-                if (link.contains('tmp-url.pro')) {
-                  link = await _resolveTempUrl(link);
-                }
+# 6. VOE scraper (2026 LUT + base64)
+with open('lib/core/video_hosts/scrapers/voe_scraper.dart', 'w') as f:
+    f.write('''import 'dart:convert';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
 
-                if (link.isEmpty || link.contains('tmp-url.pro')) return null;
+class VoeScraper extends VideoHostScraper {
+  final Dio _dio;
+  VoeScraper(this._dio);
 
-                final tableData = row.querySelectorAll('td');
-                if (tableData.length < 3) return null;
-                final language = tableData[1].text.trim();
-                final qualityVersion = tableData[2].text.trim();
+  @override
+  String get name => 'VOE';
 
-                return HostLink(
-                  url: link,
-                  lang: language,
-                  quality: qualityVersion,
-                );
-              }).toList();
+  @override
+  List<String> get domains => [
+        'voe.sx', 'voe-unblock.com', 'voe-unblock.net', 'voeunblock.com',
+        'jonathansociallike.com', 'lukecomparetwo.com', 'smoki.cc', 'ogladaj.me',
+        'wolfdyslectic.com', 'valeronevijao.com', 'goofy-banana.com',
+        'cristianefrog.com', 'alejandrocentury.com'
+      ];
 
-              final results = await Future.wait(futures);
-              return results.whereType<HostLink>().toList();
-            }
-
-            @override
-            Future<List<ServiceMovieModel>> getMovies() async {
-              await _prepareDio();
-
-              final response = await _dio!.get('/');
-              final document = html.parse(response.data);
-
-              final movies = <ServiceMovieModel>[];
-
-              for (final list in document.querySelectorAll('div[id=item-list]')) {
-                for (final item in list.children) {
-                  final poster = item.querySelector('.poster');
-                  final title = poster
-                          ?.querySelector('a')
-                          ?.attributes['title']
-                          ?.trim()
-                          .split('/')
-                          .first
-                          .trim() ??
-                      'Brak danych';
-                  final imageUrl = poster?.querySelector('img')?.attributes['data-src'] ??
-                      poster?.querySelector('img')?.attributes['src'] ??
-                      'https://placehold.co/250x370/png?font=roboto&text=?';
-                  final link =
-                      poster?.querySelector('a')?.attributes['href'] ?? 'Brak danych';
-                  final category =
-                      list.parent?.querySelector('h3')?.text.trim() ?? 'INNE';
-
-                  final movie = ServiceMovieModel(
-                    service: SupportedService.filman,
-                    title: title,
-                    imageUrl: imageUrl,
-                    url: link,
-                    category: category,
-                  );
-
-                  movies.add(movie);
-                }
-              }
-
-              return movies;
-            }
-
-            Future<List<HostLink>> _scrapeEpisodeVideoUrls(String episodeUrl) async {
-              await _prepareDio();
-
-              final response = await _dio!.get(episodeUrl);
-              final document = html.parse(response.data);
-
-              final hostLinks = await _extractHostLinksFromDocument(document);
-
-              return hostLinks;
-            }
-
-            String _prepareTitle(String title) {
-              return title.contains('/') ? title.split('/').first.trim() : title.trim();
-            }
-
-            @override
-            Future<ServiceMovieDetailsModel> getMovieDetails(String url) async {
-              await _prepareDio();
-
-              final response = await _dio!.get(url);
-              final document = html.parse(response.data);
-
-              final rawName = document
-                  .querySelector('[itemprop="name"]')
-                  ?.text
-                  .replaceAll(
-                      document.querySelector('[itemprop="name"] *')?.text ?? '', '');
-              final title = _prepareTitle(rawName?.trim().isNotEmpty == true
-                  ? rawName!
-                  : (document.querySelector('[itemprop="title"]')?.text.trim() ??
-                      document.querySelector('h2')?.text.trim() ??
-                      'Brak tytułu'));
-              final description =
-                  document.querySelector('.description')?.text.trim() ?? '';
-              final imageUrl =
-                  document.querySelector('#single-poster img')?.attributes['src'] ?? '';
-
-              final episodeList = document.querySelector('#episode-list');
-              final isSeries = episodeList != null;
-
-              if (isSeries) {
-                final seasons = <SeasonModel>[];
-
-                for (int i = 0; i < episodeList.children.length; i++) {
-                  final seasonElement = episodeList.children[i];
-                  final episodes = <EpisodeModel>[];
-
-                  for (int j = 0; j < seasonElement.children.last.children.length; j++) {
-                    final episodeElement = seasonElement.children.last.children[j];
-                    final episodeTitle =
-                        episodeElement.text.trim().split(' ').skip(1).join(' ');
-                    final episodeUrl =
-                        episodeElement.querySelector('a')?.attributes['href'];
-
-                    if (episodeUrl == null) {
-                      continue;
-                    }
-
-                    episodes.add(
-                      EpisodeModel(
-                          title: episodeTitle,
-                          number: seasonElement.children.last.children.length - j,
-                          url: episodeUrl,
-                          videoUrls: []),
-                    );
-                  }
-
-                  seasons.add(SeasonModel(
-                      number: episodeList.children.length - i,
-                      episodes: episodes.toList().reversed.toList()));
-                }
-
-                return ServiceMovieDetailsModel(
-                  service: SupportedService.filman,
-                  url: url,
-                  title: title,
-                  description: description,
-                  imageUrl: imageUrl,
-                  isSeries: isSeries,
-                  seasons: seasons.toList().reversed.toList(),
-                );
-              }
-
-              final videoUrls = await _extractHostLinksFromDocument(document);
-
-              final movieModel = ServiceMovieDetailsModel(
-                service: SupportedService.filman,
-                url: url,
-                title: title,
-                description: description,
-                imageUrl: imageUrl,
-                isSeries: isSeries,
-                videoUrls: videoUrls,
-              );
-
-              return movieModel;
-            }
-
-            @override
-            Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
-              final videoUrls = await _scrapeEpisodeVideoUrls(episode.url);
-              return episode.copyWith(videoUrls: videoUrls);
-            }
+  @override
+  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
+    try {
+      var currentUrl = url;
+      var resp = await _dio.get(currentUrl);
+      var html = resp.data.toString();
+      final redir = RegExp(r"window\\.location\\.href\\s*=\\s*['\\\"]([^'\\\"]+)['\\\"]").firstMatch(html);
+      if (redir != null) {
+        currentUrl = redir.group(1)!;
+        resp = await _dio.get(currentUrl, options: Options(headers: {'Referer': url}));
+        html = resp.data.toString();
+      }
+      final jsonScript = RegExp(r'json">\\\\["([^"]+)"\\\\]</script>\\\\s*<script\\\\s*src="([^"]+)"').firstMatch(html);
+      if (jsonScript != null) {
+        final ct = jsonScript.group(1)!;
+        final sUrl = Uri.parse(currentUrl).resolve(jsonScript.group(2)!).toString();
+        final sHtml = (await _dio.get(sUrl, options: Options(headers: {'Referer': currentUrl}))).data.toString();
+        final repl = RegExp(r"(\\\\[(?:'\\\\W{2}'[,\\\\]]){1,9})").firstMatch(sHtml);
+        if (repl != null) {
+          final luts = repl.group(1)!.substring(2, repl.group(1)!.length - 2).split("','");
+          final buf = StringBuffer();
+          for (int i = 0; i < ct.length; i++) {
+            int x = ct.codeUnitAt(i);
+            if (x > 64 && x < 91) buf.writeCharCode((x - 52) % 26 + 65);
+            else if (x > 96 && x < 123) buf.writeCharCode((x - 84) % 26 + 97);
+            else buf.writeCharCode(x);
           }
-          """)
-
-          # 4. VidNeoScraper (vidneo.cc)
-          with open('lib/core/video_hosts/scrapers/vidneo_scraper.dart', 'w', encoding='utf-8') as f:
-              f.write(r"""import 'package:dio/dio.dart';
-          import 'package:flutter/foundation.dart';
-          import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
-
-          class VidNeoScraper extends VideoHostScraper {
-            final Dio _dio;
-
-            VidNeoScraper(this._dio);
-
-            @override
-            String get name => 'VidNeo';
-
-            @override
-            List<String> get domains => ['vidneo.cc', 'vidneo.to', 'vidneo.net'];
-
-            static const String _ua =
-                'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
-
-            @override
-            Future<VideoSource?> getVideoSource(
-                String url, String lang, String quality) async {
-              try {
-                final uri = Uri.parse(url);
-                final origin = '${uri.scheme}://${uri.host}';
-                final response = await _dio.get(
-                  url,
-                  options: Options(headers: {
-                    'User-Agent': _ua,
-                    'Referer': 'https://obejrzyj.to/',
-                  }),
-                );
-                final html = response.data.toString();
-
-                final match = RegExp(r'''\\?"src\\?":\s*\\?"([^"\\]+\.m3u8[^"\\]*)''')
-                        .firstMatch(html) ??
-                    RegExp(r'''(https?://[^"'\s\\]+\.m3u8[^"'\s\\]*|/hls/[^"'\s\\]+\.m3u8[^"'\s\\]*)''')
-                        .firstMatch(html);
-
-                if (match != null && match.group(1) != null) {
-                  var streamUrl = match.group(1)!.replaceAll(r'\/', '/');
-                  if (streamUrl.startsWith('/')) {
-                    streamUrl = '$origin$streamUrl';
-                  }
-                  return VideoSource(
-                    url: streamUrl,
-                    lang: lang,
-                    quality: quality,
-                    host: name,
-                    headers: {
-                      'User-Agent': _ua,
-                      'Referer': url,
-                      'Origin': origin,
-                    },
-                  );
-                }
-                return null;
-              } catch (e) {
-                debugPrint('VidNeoScraper error ($url): $e');
-                return null;
-              }
-            }
+          var txt = buf.toString();
+          for (final p in luts) txt = txt.replaceAll(p, '');
+          final dec1 = latin1.decode(base64Decode(base64.normalize(txt)));
+          final shifted = String.fromCharCodes(dec1.codeUnits.map((c) => c - 3)).split('').reversed.join();
+          final data = jsonDecode(utf8.decode(base64Decode(base64.normalize(shifted)), allowMalformed: true));
+          final stream = (data['source'] ?? data['file'] ?? data['direct_access_url'])?.toString();
+          if (stream != null && stream.isNotEmpty) {
+            return VideoSource(url: stream, lang: lang, quality: quality, host: name, headers: {'Referer': currentUrl});
           }
-          """)
-
-          # 5. VidaraScraper (vidara.to / streamix.so / stmix.io)
-          with open('lib/core/video_hosts/scrapers/vidara_scraper.dart', 'w', encoding='utf-8') as f:
-              f.write(r"""import 'dart:convert';
-          import 'package:dio/dio.dart';
-          import 'package:flutter/foundation.dart';
-          import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
-
-          class VidaraScraper extends VideoHostScraper {
-            final Dio _dio;
-
-            VidaraScraper(this._dio);
-
-            @override
-            String get name => 'Vidara';
-
-            @override
-            List<String> get domains => ['vidara.to', 'streamix.so', 'stmix.io'];
-
-            static const String _ua =
-                'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
-
-            @override
-            Future<VideoSource?> getVideoSource(
-                String url, String lang, String quality) async {
-              try {
-                final uri = Uri.parse(url);
-                final origin = '${uri.scheme}://${uri.host}';
-                final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-                if (segments.isEmpty) return null;
-                final mediaId = segments.last;
-
-                final response = await _dio.post(
-                  '$origin/api/stream',
-                  data: jsonEncode({'filecode': mediaId, 'device': 'web'}),
-                  options: Options(
-                    headers: {
-                      'User-Agent': _ua,
-                      'Referer': url,
-                      'Origin': origin,
-                      'Content-Type': 'application/json',
-                    },
-                  ),
-                );
-
-                final data = response.data is String
-                    ? jsonDecode(response.data as String)
-                    : response.data;
-                if (data is Map && data['streaming_url'] != null) {
-                  final streamUrl = data['streaming_url'].toString();
-                  if (streamUrl.isNotEmpty) {
-                    return VideoSource(
-                      url: streamUrl,
-                      lang: lang,
-                      quality: quality,
-                      host: name,
-                      headers: {
-                        'User-Agent': _ua,
-                        'Referer': '$origin/',
-                        'Origin': origin,
-                      },
-                    );
-                  }
-                }
-                return null;
-              } catch (e) {
-                debugPrint('VidaraScraper error ($url): $e');
-                return null;
-              }
-            }
+        }
+      }
+      for (final p in [r"['\\\"]hls['\\\"]\\\\s*:\\\\s*['\\\"]([^'\\\"]+)['\\\"]", r"['\\\"]mp4['\\\"]\\\\s*:\\\\s*['\\\"]([^'\\\"]+)['\\\"]"]) {
+        final m = RegExp(p).firstMatch(html);
+        if (m != null) {
+          var cand = m.group(1)!;
+          if (!cand.startsWith('http')) {
+            try { cand = utf8.decode(base64Decode(base64.normalize(cand))); } catch (_) {}
           }
-          """)
+          if (cand.startsWith('http')) {
+            return VideoSource(url: cand, lang: lang, quality: quality, host: name, headers: {'Referer': currentUrl});
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('VOE error: $e');
+    }
+    return null;
+  }
+}
+''')
 
-          # 6. VoeScraper (2026 voe_decode + classic fallbacks)
-          with open('lib/core/video_hosts/scrapers/voe_scraper.dart', 'w', encoding='utf-8') as f:
-              f.write(r"""import 'dart:convert';
-          imp
+# 7. video_hosts_container.dart registration
+with open('lib/di/video_hosts_container.dart', 'w') as f:
+    f.write('''import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
+import 'package:purevideo/core/video_hosts/scrapers/doodstream_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/ekino_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/filemoon_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/kinoger_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/lulustream_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/streamruby_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/streamtape_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/vidara_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/vidneo_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/vidoza_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/voe_scraper.dart';
+import 'package:purevideo/core/video_hosts/scrapers/vtube_scraper.dart';
+import 'package:purevideo/core/video_hosts/video_host_registry.dart';
+
+class VideoHostsContainer {
+  static void registerVideoScrapers(VideoHostRegistry registry) {
+    final Dio dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+        sendTimeout: const Duration(seconds: 8),
+        validateStatus: (status) => true,
+      ),
+    );
+    final ioc = HttpClient();
+    ioc.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+    dio.httpClientAdapter = IOHttpClientAdapter(createHttpClient: () => ioc);
+
+    registry.registerScraper(VidNeoScraper(dio));
+    registry.registerScraper(VidaraScraper(dio));
+    registry.registerScraper(VoeScraper(dio));
+    registry.registerScraper(StreamtapeScraper(dio));
+    registry.registerScraper(VidozaScraper(dio));
+    registry.registerScraper(DoodStreamScraper(dio));
+    registry.registerScraper(VtubeScraper(dio));
+    registry.registerScraper(KinoGerScraper(dio));
+    registry.registerScraper(LuluStreamScraper(dio));
+    registry.registerScraper(StreamrubyScraper(dio));
+    registry.registerScraper(EkinoScraper());
+    registry.registerScraper(FileMoonScraper(dio));
+  }
+}
+''')
+
+# 8. video_host_registry.dart fallback to VOE for /e/
+with open('lib/core/video_hosts/video_host_registry.dart', 'w') as f:
+    f.write('''import 'package:collection/collection.dart';
+import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
+
+class VideoHostRegistry {
+  final List<VideoHostScraper> _scrapers = [];
+
+  void registerScraper(VideoHostScraper scraper) {
+    _scrapers.add(scraper);
+  }
+
+  VideoHostScraper? getScraperForUrl(String url) {
+    final exact = _scrapers.firstWhereOrNull((s) => s.canHandle(url));
+    if (exact != null) return exact;
+    if (url.contains('/e/')) {
+      return _scrapers.firstWhereOrNull((s) => s.name == 'VOE');
+    }
+    return null;
+  }
+
+  bool isHostSupported(String url) => getScraperForUrl(url) != null;
+  List<VideoHostScraper> get scrapers => List.unmodifiable(_scrapers);
+}
+''')
+PYEOF
+          python3 patch_app.py
+          rm -f patch_app.py
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Generate Keystore (Identical to Author Setup)
+        run: |
+          keytool -genkey -v -keystore android/app/keystore.jks -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
+          echo "storePassword=purevideopass" > android/key.properties
+          echo "keyPassword=purevideopass" >> android/key.properties
+          echo "keyAlias=purevideo" >> android/key.properties
+          echo "storeFile=keystore.jks" >> android/key.properties
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.32.6
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: |
+          set +e
+          flutter build apk --release 2>&1 | tee build_log.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::BUILD_ERROR_LOG: $(grep -E 'Error:|FAILURE:|What went wrong:|Exception' -A 5 build_log.txt | tr '\n' ' ')"
+            exit $EXIT_CODE
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PureVideo-Fixed-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
