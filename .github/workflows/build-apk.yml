@@ -18,7 +18,7 @@ jobs:
       - name: Rebuild app.zip (LibResolveURL + deps) & Apply Filman + Player Fixes
         run: |
           python3 - << 'PYEOF'
-          import os, shutil, zipfile, hashlib, urllib.request, json, io
+          import os, shutil, zipfile, hashlib, urllib.request, json, io, re
 
           print('=== 1. Patching android/app/build.gradle.kts (minSdk=24, compileSdk=36) ===')
           p_gradle = 'android/app/build.gradle.kts'
