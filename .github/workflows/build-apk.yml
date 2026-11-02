@@ -278,6 +278,7 @@ jobs:
                             if (!completer.isCompleted) completer.complete(msgStr);'''
           assert old_cb in s_wv, 'old_cb not found'
           s_wv = s_wv.replace('callback: (message) {', 'callback: (message) async {').replace(old_cb, new_cb)
+          s_wv = s_wv.replace('final completer = Completer<List<io.Cookie>?>();', 'final completer = Completer<List<io.Cookie>?>(); Future.delayed(const Duration(seconds: 6), () { if (!completer.isCompleted) completer.complete(null); });')
           open(p_wv, 'w', encoding='utf-8').write(s_wv)
 
           p_auth = 'lib/data/repositories/filman/filman_auth_repository.dart'
@@ -396,11 +397,15 @@ jobs:
 
           p_mdb = 'lib/presentation/movie_details/bloc/movie_details_bloc.dart'
           s_mdb = open(p_mdb, encoding='utf-8').read()
+          if 'await loggedServiceEntry.value.searchMovies(event.movie.title);' in s_mdb:
+              s_mdb = s_mdb.replace('await loggedServiceEntry.value.searchMovies(event.movie.title);', "await (async () async { final q1 = event.movie.title.trim().isNotEmpty ? event.movie.title.trim() : event.movie.originalTitle.trim(); var r = await loggedServiceEntry.value.searchMovies(q1).timeout(const Duration(seconds: 7), onTimeout: () => []); if (r.isEmpty && event.movie.originalTitle.trim().isNotEmpty && event.movie.originalTitle.trim() != q1) { try { r = await loggedServiceEntry.value.searchMovies(event.movie.originalTitle.trim()).timeout(const Duration(seconds: 7), onTimeout: () => []); } catch (_) {} } return r; })();")
           mdb_old = 'add(LoadMovieDetails(movie: results.first));'
-          mdb_new = "if (results.isEmpty) { emit(state.copyWith(errorMessage: 'Nie znaleziono wideo dla: ${event.movie.title}', isLoaded: true)); return; } add(LoadMovieDetails(movie: results.first));"
+          mdb_new = "if (results.isEmpty) { emit(state.copyWith(errorMessage: 'Nie znaleziono wideo dla: ' + (event.movie.title.isNotEmpty ? event.movie.title : event.movie.originalTitle) + '. Upewnij się, że jesteś zalogowany w Ustawieniach.', isLoaded: true)); return; } add(LoadMovieDetails(movie: results.first));"
           if mdb_old in s_mdb:
               s_mdb = s_mdb.replace(mdb_old, mdb_new)
-              open(p_mdb, 'w', encoding='utf-8').write(s_mdb)
+          if 'await _videoSourceRepository.scrapeVideoUrls(event.movie);' in s_mdb:
+              s_mdb = s_mdb.replace('await _videoSourceRepository.scrapeVideoUrls(event.movie);', 'await _videoSourceRepository.scrapeVideoUrls(event.movie).timeout(const Duration(seconds: 10), onTimeout: () => event.movie);')
+          open(p_mdb, 'w', encoding='utf-8').write(s_mdb)
 
           p_main = 'lib/main.dart'
           s_main = open(p_main, encoding='utf-8').read()
