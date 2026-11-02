@@ -28,9 +28,10 @@ jobs:
             lib/data/repositories/filman/filman_movie_repository.dart \
             lib/data/repositories/filman/filman_search_repository.dart
 
-          echo "=== 3. Poprawka odtwarzacza: brak odrzucania dzialajacych strumieni ==="
-          python3 -c "p = 'lib/data/repositories/video_source_repository.dart'; s = open(p).read().replace('if (response.statusCode != 200) continue;', '// direct').replace(\"debugPrint('Error checking video source URL: \$e');\\n        continue;\", '// keep'); open(p, 'w').write(s)"
-          python3 -c "p = 'lib/presentation/player/bloc/player_bloc.dart'; s = open(p).read().replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }'); open(p, 'w').write(s)"
+          echo "=== 3. Poprawka odtwarzacza i dekodowania zrodel Filmana ==="
+          python3 -c "p = 'lib/data/repositories/filman/filman_movie_repository.dart'; s = open(p).read(); old = 'link = (utf8.decode(decoded));'; new = '''final decodedStr = utf8.decode(decoded); if (decodedStr.trim().startsWith(\"{\")) { final dynamic parsed = jsonDecode(decodedStr); link = (parsed is Map ? (parsed[\"src\"] ?? parsed[\"url\"] ?? \"\") : \"\").toString(); } else { link = decodedStr; }'''; s = s.replace(old, new).replace(\"return '';\", 'return tempUrl;'); open(p, 'w').write(s)"
+          python3 -c "p = 'lib/data/repositories/video_source_repository.dart'; s = open(p).read(); s = s.replace('final scraper = _hostRegistry.getScraperForUrl(hostLink.url);', '''if (hostLink.url.contains(\".m3u8\") || hostLink.url.contains(\".mp4\")) { videoSources.add(VideoSource(url: hostLink.url, lang: hostLink.lang, quality: hostLink.quality, host: \"Direct\")); continue; } final scraper = _hostRegistry.getScraperForUrl(hostLink.url);''').replace('if (response.statusCode != 200) continue;', '// direct').replace(\"debugPrint('Error checking video source URL: \$e');\\n        continue;\", '// keep'); open(p, 'w').write(s)"
+          python3 -c "p = 'lib/presentation/player/bloc/player_bloc.dart'; s = open(p).read(); s = s.replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }'); open(p, 'w').write(s)"
 
       - name: Setup Java
         uses: actions/setup-java@v4
