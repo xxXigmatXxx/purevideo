@@ -47,6 +47,11 @@ jobs:
               os.makedirs(os.path.join(work, 'python_data', 'resources'), exist_ok=True)
               shutil.copyfile('python_data/resources/settings.xml', os.path.join(work, 'python_data', 'resources', 'settings.xml'))
 
+          sp_root = '/tmp/serious_python_site_packages'
+          shutil.rmtree(sp_root, ignore_errors=True)
+          for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64'):
+              os.makedirs(os.path.join(sp_root, abi, 'opt'), exist_ok=True)
+
           for pkg in ['six', 'urllib3', 'idna', 'certifi', 'chardet', 'requests']:
               meta = json.loads(urllib.request.urlopen(f'https://pypi.org/pypi/{pkg}/json').read())
               for u in meta['urls']:
@@ -54,6 +59,8 @@ jobs:
                       whl = urllib.request.urlopen(u['url']).read()
                       with zipfile.ZipFile(io.BytesIO(whl)) as z:
                           z.extractall(work)
+                          for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64'):
+                              z.extractall(os.path.join(sp_root, abi))
                       break
 
           main_py = '''#!/usr/bin/env python3
@@ -385,6 +392,8 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
+        env:
+          SERIOUS_PYTHON_SITE_PACKAGES: /tmp/serious_python_site_packages
         run: |
           set +e
           flutter build apk --release 2>&1 | tee build_log.txt
