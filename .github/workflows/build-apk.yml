@@ -17,10 +17,10 @@ jobs:
 
       - name: Apply Filman Login and Player Fixes
         run: |
-          echo "=== 1. Przywracanie bazy 61de1c3 ==="
+          echo "=== 1. Reset do stabilnej bazy 61de1c3 ==="
           git checkout -f 61de1c394e8a91fb54b64a650c2d4ca8b4b0cc8e
 
-          echo "=== 2. Pobieranie naprawionego logowania Filman.cc z 0f94513 ==="
+          echo "=== 2. Pobieranie naprawionego logowania Filman.cc oraz dekodera z 0f94513 ==="
           git checkout 0f94513fb6f5ceb0e32b0a32673586cc3e6f5ec2 -- \
             lib/data/models/auth_model.dart \
             lib/data/repositories/filman/filman_auth_repository.dart \
@@ -28,118 +28,9 @@ jobs:
             lib/data/repositories/filman/filman_movie_repository.dart \
             lib/data/repositories/filman/filman_search_repository.dart
 
-          echo "=== 3. Aplikowanie poprawek odtwarzacza wideo ==="
-          cat << 'PYEOF' > patch_app.py
-import os, json
-
-# 1. Domena ekino.ws
-for p in ['lib/core/utils/supported_enum.dart', 'lib/data/repositories/ekino/ekino_movie_repository.dart']:
-    with open(p, 'r') as f:
-        c = f.read().replace('https://ekino-tv.pl', 'https://ekino.ws').replace('SupportedService.obejrzyjto', 'SupportedService.ekino')
-    with open(p, 'w') as f:
-        f.write(c)
-
-# 2. Usuniecie head check z video_source_repository.dart
-with open('lib/data/repositories/video_source_repository.dart', 'r') as f:
-    c = f.read().replace('if (response.statusCode != 200) continue;', '// accept stream directly')
-with open('lib/data/repositories/video_source_repository.dart', 'w') as f:
-    f.write(c)
-
-# 3. Dynamiczne dociaganie zrodel w player_bloc.dart
-p_player = 'lib/presentation/player/bloc/player_bloc.dart'
-with open(p_player, 'r') as f:
-    c = f.read().replace(
-        'movieDetails = _movie!;\n        // await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc',
-        'movieDetails = _movie!;\n        if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) {\n          movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!);\n        }'
-    )
-with open(p_player, 'w') as f:
-    f.write(c)
-
-# 4. Scraper VidNeo (vidneo.cc)
-with open('lib/core/video_hosts/scrapers/vidneo_scraper.dart', 'w') as f:
-    f.write('''import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
-import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
-
-class VidNeoScraper extends VideoHostScraper {
-  final Dio _dio;
-  VidNeoScraper(this._dio);
-
-  @override
-  String get name => 'VidNeo';
-
-  @override
-  List<String> get domains => ['vidneo.cc', 'vidneo.to', 'vidneo.net'];
-
-  @override
-  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
-    try {
-      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
-      final resp = await _dio.get(url, options: Options(headers: {'Referer': 'https://obejrzyj.to/'}));
-      final m = RegExp(r'(?:src\\\\?":\\\\?"|src":")([^"\\\\]+\\.m3u8[^"\\\\]*)').firstMatch(resp.data.toString());
-      if (m != null && m.group(1) != null) {
-        var s = m.group(1)!.replaceAll(r'\\/', '/');
-        if (s.startsWith('/')) s = '$origin$s';
-        return VideoSource(url: s, lang: lang, quality: quality, host: name, headers: {'Referer': url});
-      }
-    } catch (e) {
-      debugPrint('VidNeo error: $e');
-    }
-    return null;
-  }
-}
-''')
-
-# 5. Scraper Vidara (vidara.to)
-with open('lib/core/video_hosts/scrapers/vidara_scraper.dart', 'w') as f:
-    f.write('''import 'dart:convert';
-import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
-import 'package:purevideo/core/video_hosts/video_host_scraper.dart';
-
-class VidaraScraper extends VideoHostScraper {
-  final Dio _dio;
-  VidaraScraper(this._dio);
-
-  @override
-  String get name => 'Vidara';
-
-  @override
-  List<String> get domains => ['vidara.to', 'streamix.so', 'stmix.io'];
-
-  @override
-  Future<VideoSource?> getVideoSource(String url, String lang, String quality) async {
-    try {
-      final origin = '${Uri.parse(url).scheme}://${Uri.parse(url).host}';
-      final id = Uri.parse(url).pathSegments.where((s) => s.isNotEmpty).last;
-      final resp = await _dio.post('$origin/api/stream',
-          data: jsonEncode({'filecode': id, 'device': 'web'}),
-          options: Options(headers: {'Referer': url, 'Origin': origin, 'Content-Type': 'application/json'}));
-      final data = resp.data is String ? jsonDecode(resp.data) : resp.data;
-      if (data is Map && data['streaming_url'] != null) {
-        return VideoSource(url: data['streaming_url'].toString(), lang: lang, quality: quality, host: name, headers: {'Referer': '$origin/'});
-      }
-    } catch (e) {
-      debugPrint('Vidara error: $e');
-    }
-    return null;
-  }
-}
-''')
-
-# 6. Rejestracja w video_hosts_container.dart
-with open('lib/di/video_hosts_container.dart', 'r') as f:
-    c = f.read()
-if 'VidNeoScraper' not in c:
-    c = "import 'package:purevideo/core/video_hosts/scrapers/vidneo_scraper.dart';\nimport 'package:purevideo/core/video_hosts/scrapers/vidara_scraper.dart';\n" + c
-    c = c.replace('registry.registerScraper(StreamtapeScraper(dio));', 'registry.registerScraper(StreamtapeScraper(dio));\n    registry.registerScraper(VidNeoScraper(dio));\n    registry.registerScraper(VidaraScraper(dio));')
-    with open('lib/di/video_hosts_container.dart', 'w') as f:
-        f.write(c)
-
-print("Patch applied successfully!")
-PYEOF
-          python3 patch_app.py
-          rm -f patch_app.py
+          echo "=== 3. Poprawka odtwarzacza: brak odrzucania dzialajacych strumieni ==="
+          python3 -c "p = 'lib/data/repositories/video_source_repository.dart'; s = open(p).read().replace('if (response.statusCode != 200) continue;', '// direct').replace(\"debugPrint('Error checking video source URL: \$e');\\n        continue;\", '// keep'); open(p, 'w').write(s)"
+          python3 -c "p = 'lib/presentation/player/bloc/player_bloc.dart'; s = open(p).read().replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }'); open(p, 'w').write(s)"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -147,7 +38,7 @@ PYEOF
           distribution: "temurin"
           java-version: "17"
 
-      - name: Generate Keystore (Identical to Author Setup)
+      - name: Generate Keystore
         run: |
           keytool -genkey -v -keystore android/app/keystore.jks -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
           echo "storePassword=purevideopass" > android/key.properties
