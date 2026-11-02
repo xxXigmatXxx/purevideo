@@ -15,24 +15,352 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply Filman Login and Player Fixes
+      - name: Rebuild app.zip (LibResolveURL + deps) & Apply Filman + Player Fixes
         run: |
-          echo "=== 1. Reset do stabilnej bazy 61de1c3 ==="
-          git checkout -f 61de1c394e8a91fb54b64a650c2d4ca8b4b0cc8e
+          python3 - << 'PYEOF'
+          import os, shutil, zipfile, hashlib, urllib.request, json, io
 
-          echo "=== 2. Pobieranie naprawionego logowania Filman.cc oraz dekodera z 0f94513 ==="
-          git checkout 0f94513fb6f5ceb0e32b0a32673586cc3e6f5ec2 -- \
-            lib/data/models/auth_model.dart \
-            lib/data/repositories/filman/filman_auth_repository.dart \
-            lib/data/repositories/filman/filman_dio_factory.dart \
-            lib/data/repositories/filman/filman_movie_repository.dart \
-            lib/data/repositories/filman/filman_search_repository.dart
+          print('=== 1. Patching android/app/build.gradle.kts (minSdk=24, compileSdk=36) ===')
+          p_gradle = 'android/app/build.gradle.kts'
+          s_gradle = open(p_gradle, encoding='utf-8').read()
+          s_gradle = s_gradle.replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
+          s_gradle = s_gradle.replace('ndkVersion = "28.2.13676358"', 'ndkVersion = "27.0.12077973"')
+          open(p_gradle, 'w', encoding='utf-8').write(s_gradle)
 
-          echo "=== 3. Poprawka odtwarzacza (InAppWebView + natywny) i dekodowania zrodel Filmana ==="
-          python3 -c "p='lib/data/repositories/filman/filman_movie_repository.dart'; s=open(p).read(); s=s.replace('link = (utf8.decode(decoded));', '''final d = utf8.decode(decoded).trim(); if (d.startsWith(\"{\")) { try { final dynamic m = jsonDecode(d); link = (m is Map ? (m[\"src\"] ?? m[\"url\"] ?? d) : d).toString(); } catch (_) { link = d; } } else { link = d; } if (link.startsWith(\"//\")) link = \"https:\" + link;''').replace(\"return '';\", 'return tempUrl;'); open(p,'w').write(s)"
-          python3 -c "p='lib/presentation/player/bloc/player_bloc.dart'; s=open(p).read(); s=s.replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }').replace('await _player.open(', 'final isDirect = event.source.url.contains(\".mp4\") || event.source.url.contains(\".m3u8\") || event.source.url.contains(\"get_video\"); if (!isDirect) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: \"\")); return; } await _player.open('); open(p,'w').write(s)"
-          python3 -c "p='lib/data/repositories/video_source_repository.dart'; s='''import \"package:flutter/material.dart\";\nimport \"package:purevideo/core/video_hosts/video_host_registry.dart\";\nimport \"package:purevideo/core/video_hosts/video_host_scraper.dart\";\nimport \"package:purevideo/data/models/movie_model.dart\";\nimport \"package:purevideo/di/injection_container.dart\";\n\nclass VideoSourceRepository {\n  final VideoHostRegistry _hostRegistry = getIt<VideoHostRegistry>();\n\n  Future<MovieDetailsModel> scrapeVideoUrls(MovieDetailsModel movie) async {\n    if (movie.videoUrls == null) return movie;\n    final videoSources = <VideoSource>[];\n    for (final hostLink in movie.videoUrls!) {\n      if (hostLink.url.isEmpty) continue;\n      final uri = Uri.tryParse(hostLink.url);\n      final hostName = (uri != null && uri.host.isNotEmpty) ? uri.host.replaceFirst(\"www.\", \"\") : \"Wideo\";\n      videoSources.add(VideoSource(url: hostLink.url, lang: hostLink.lang, quality: hostLink.quality, host: hostName, headers: {\"Referer\": \"https://filman.cc/\"}));\n    }\n    return movie.copyWith(directUrls: videoSources);\n  }\n}\n'''; open(p,'w').write(s)"
-          python3 -c "p='lib/presentation/player/screens/player_screen.dart'; s='import \"package:flutter_inappwebview/flutter_inappwebview.dart\";\n' + open(p).read(); s=s.replace('return Scaffold(\n      backgroundColor: Colors.black,\n      body: Stack(\n        children: [\n          Video(', '''final selectedUrl = state.selectedSource?.url ?? \"\";\n    final isDirect = selectedUrl.contains(\".mp4\") || selectedUrl.contains(\".m3u8\") || selectedUrl.contains(\"get_video\");\n    if (selectedUrl.isNotEmpty && !isDirect) {\n      return Scaffold(\n        backgroundColor: Colors.black,\n        body: Stack(\n          children: [\n            InAppWebView(\n              key: ValueKey(selectedUrl),\n              initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: {\"Referer\": \"https://filman.cc/\"}),\n              initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: \"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36\"),\n              onCreateWindow: (controller, action) async => false,\n              shouldOverrideUrlLoading: (controller, nav) async {\n                final u = nav.request.url?.toString() ?? \"\";\n                if (!u.startsWith(\"http\")) return NavigationActionPolicy.CANCEL;\n                return NavigationActionPolicy.ALLOW;\n              },\n            ),\n            SafeArea(\n              child: Align(\n                alignment: Alignment.topCenter,\n                child: Container(\n                  color: Colors.black54,\n                  height: 48,\n                  padding: const EdgeInsets.symmetric(horizontal: 8),\n                  child: Row(\n                    children: [\n                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.of(context).pop()),\n                      Expanded(child: Text((state.selectedSource?.host ?? \"Odtwarzacz\") + \" • \" + (state.selectedSource?.quality ?? \"\") + \" \" + (state.selectedSource?.lang ?? \"\"), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),\n                      if (state.videoSources != null && state.videoSources!.length > 1)\n                        PopupMenuButton<VideoSource>(\n                          icon: const Icon(Icons.settings, color: Colors.white),\n                          onSelected: (source) => bloc.add(ChangeVideoSource(source: source)),\n                          itemBuilder: (context) => state.videoSources!.map((source) => PopupMenuItem<VideoSource>(value: source, child: Text(source.host + \": \" + source.quality + \" - \" + source.lang))).toList(),\n                        ),\n                    ],\n                  ),\n                ),\n              ),\n            ),\n          ],\n        ),\n      );\n    }\n    return Scaffold(\n      backgroundColor: Colors.black,\n      body: Stack(\n        children: [\n          Video('''); open(p,'w').write(s)"
+          print('=== 2. Rebuilding app/app.zip and app/app.zip.hash ===')
+          work = '/tmp/_app_zip_build'
+          shutil.rmtree(work, ignore_errors=True)
+          os.makedirs(work, exist_ok=True)
+
+          with zipfile.ZipFile('app/app.zip', 'r') as z:
+              z.extractall(work)
+
+          for root, dirs, files in os.walk(work, topdown=False):
+              for f in files:
+                  if f.endswith(('.pyc', '.pyo')):
+                      os.remove(os.path.join(root, f))
+              for d in dirs:
+                  if d in ('__pycache__', '.git', '.dart_tool'):
+                      shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+
+          if os.path.exists('python_data/resources/settings.xml'):
+              os.makedirs(os.path.join(work, 'python_data', 'resources'), exist_ok=True)
+              shutil.copyfile('python_data/resources/settings.xml', os.path.join(work, 'python_data', 'resources', 'settings.xml'))
+
+          for pkg in ['six', 'urllib3', 'idna', 'certifi', 'chardet', 'requests']:
+              meta = json.loads(urllib.request.urlopen(f'https://pypi.org/pypi/{pkg}/json').read())
+              for u in meta['urls']:
+                  if u['filename'].endswith(('-py2.py3-none-any.whl', '-py3-none-any.whl')):
+                      whl = urllib.request.urlopen(u['url']).read()
+                      with zipfile.ZipFile(io.BytesIO(whl)) as z:
+                          z.extractall(work)
+                      break
+
+          main_py = '''#!/usr/bin/env python3
+          import os, re, sys, ssl, json, base64, traceback, urllib.request
+          from urllib.parse import unquote
+          from http.server import HTTPServer, BaseHTTPRequestHandler
+          from socketserver import ThreadingMixIn
+          from concurrent.futures import ThreadPoolExecutor
+
+          base_dir = os.path.dirname(os.path.realpath(__file__))
+          data_dir = os.path.join(base_dir, "python_data")
+          os.makedirs(os.path.join(data_dir, "resources"), exist_ok=True)
+          os.environ["LIBRESOLVEURL_CONFIG_DIR"] = data_dir
+          os.environ["LIBRESOLVEURL_ADDON_PATH"] = data_dir
+
+          for p in (base_dir, data_dir, os.path.join(base_dir, "LibResolveURL")):
+              if p not in sys.path:
+                  sys.path.insert(0, p)
+
+          try:
+              ssl._create_default_https_context = ssl._create_unverified_context
+          except Exception:
+              pass
+
+          LIBRESOLVEURL_AVAILABLE = False
+          libresolveurl = None
+          try:
+              import libresolveurl
+              try:
+                  import resolveurl.common as common
+                  common.settings_file = os.path.join(data_dir, "resources", "settings.xml")
+                  from resolveurl.lib import net
+                  orig_init = net.Net.__init__
+                  def patched_net_init(self, *args, **kwargs):
+                      kwargs["ssl_verify"] = False
+                      orig_init(self, *args, **kwargs)
+                  net.Net.__init__ = patched_net_init
+              except Exception as e:
+                  print(f"DEBUG: Net patch warning: {e}")
+              LIBRESOLVEURL_AVAILABLE = True
+          except Exception as e:
+              print(f"DEBUG: libresolveurl import error: {e}")
+
+          UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+
+          def host_name(url: str) -> str:
+              m = re.search(r"://(?:www\.)?([^/]+)", url)
+              return m.group(1).split(".")[0].upper() if m else "WIDEO"
+
+          def clean_and_unwrap_url(url: str) -> str:
+              url = (url or "").strip()
+              if url.startswith("{"):
+                  try:
+                      obj = json.loads(url)
+                      url = str(obj.get("src") or obj.get("url") or url).strip()
+                  except Exception:
+                      pass
+              if url.startswith("//"):
+                  url = "https:" + url
+              if "tmp-url.pro" in url:
+                  try:
+                      req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
+                      with urllib.request.urlopen(req, timeout=6) as resp:
+                          body = resp.read().decode("utf-8", errors="ignore")
+                      me = re.search(r"var\s+_e\s*=\s*['\"]([A-Za-z0-9+/=]+)['\"]", body)
+                      ma = re.search(r"var\s+_a\s*=\s*['\"]([^'\"]+)['\"]", body)
+                      mb = re.search(r"var\s+_b\s*=\s*['\"]([^'\"]+)['\"]", body)
+                      mc = re.search(r"var\s+_c\s*=\s*['\"]([^'\"]+)['\"]", body)
+                      if me and ma and mb and mc:
+                          raw = base64.b64decode(me.group(1))
+                          key = (ma.group(1) + mb.group(1) + mc.group(1)).encode("utf-8")
+                          dec = "".join(chr(raw[i] ^ key[i % len(key)]) for i in range(len(raw)))
+                          if dec.startswith("http"):
+                              return dec
+                  except Exception:
+                      pass
+              return url
+
+          def fallback_regex_resolve(url: str):
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
+                  with urllib.request.urlopen(req, timeout=6) as resp:
+                      html = resp.read().decode("utf-8", errors="ignore")
+                  redir = re.search(r"window\.location\.href\s*=\s*['\"](https?://[^'\"]+)['\"]", html)
+                  if redir:
+                      url = redir.group(1)
+                      req2 = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
+                      with urllib.request.urlopen(req2, timeout=6) as resp2:
+                          html = resp2.read().decode("utf-8", errors="ignore")
+                  m_mp4 = re.search(r"sourcesCode\s*:\s*\[\s*\{\s*src:\s*['\"](https?://[^'\"]+)['\"]", html) or re.search(r"<source[^>]+src=['\"](https?://[^'\"]+\.mp4[^'\"]*)['\"]", html)
+                  if m_mp4:
+                      return m_mp4.group(1) + f"|User-Agent={UA}&Referer={url}"
+                  m_rob = re.search(r"id=['\"]robotlink['\"][^>]*>([^<]+)", html)
+                  m_tok = re.search(r"getElementById\(['\"]robotlink['\"]\)\.innerHTML\s*\+\s*['\"]([^'\"]+)['\"]", html)
+                  if m_rob and m_tok:
+                      return "https:" + m_rob.group(1).strip() + m_tok.group(1).strip() + f"|User-Agent={UA}&Referer={url}"
+                  m_hls = re.search(r"['\"]hls['\"]\s*:\s*['\"](https?://[^'\"]+\.m3u8[^'\"]*)['\"]", html) or re.search(r"(https?://[^\s\"'<>\\]+\.m3u8[^\s\"'<>\\]*)", html)
+                  if m_hls:
+                      return m_hls.group(1).replace("\\/", "/") + f"|User-Agent={UA}&Referer={url}"
+                  for b64 in re.findall(r"['\"](aHR0c[A-Za-z0-9+/=]{16,})['\"]", html):
+                      try:
+                          d = base64.b64decode(b64).decode("utf-8", errors="ignore")
+                          if d.startswith("http"):
+                              return d + f"|User-Agent={UA}&Referer={url}"
+                      except Exception:
+                          pass
+              except Exception:
+                  pass
+              return None
+
+          def resolve_single_item(item):
+              try:
+                  if isinstance(item, str):
+                      raw_url, language, quality, extra_headers = item, "PL", "HD", {}
+                  elif isinstance(item, dict):
+                      raw_url = item.get("url") or ""
+                      language = item.get("language") or item.get("lang") or "PL"
+                      quality = item.get("quality") or "HD"
+                      extra_headers = item.get("headers") or {}
+                  else:
+                      return None, None
+                  url = clean_and_unwrap_url(raw_url)
+                  if not url:
+                      return None, None
+                  headers = {"User-Agent": UA, "Referer": url}
+                  if isinstance(extra_headers, dict):
+                      headers.update(extra_headers)
+                  resolved = None
+                  if LIBRESOLVEURL_AVAILABLE and libresolveurl:
+                      try:
+                          resolved = libresolveurl.resolve(url)
+                      except Exception:
+                          resolved = None
+                  if not resolved:
+                      resolved = fallback_regex_resolve(url)
+                  if resolved:
+                      if "|" in resolved:
+                          resolved_url, header_str = resolved.split("|", 1)
+                          for pair in header_str.split("&"):
+                              if "=" in pair:
+                                  k, v = pair.split("=", 1)
+                                  headers[k.strip()] = unquote(v.strip())
+                          resolved = resolved_url.strip()
+                      return ({"host": host_name(url), "url": resolved, "headers": headers, "language": language, "quality": quality}, None)
+                  else:
+                      return (None, {"host": host_name(url) + " (Web)", "url": url, "headers": {"User-Agent": UA, "Referer": "https://filman.cc/"}, "language": language, "quality": quality})
+              except Exception:
+                  return None, None
+
+          class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+              daemon_threads = True
+              allow_reuse_address = True
+
+          class ResolverHandler(BaseHTTPRequestHandler):
+              def _send_json(self, status: int, payload):
+                  body = json.dumps(payload).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def do_GET(self):
+                  self._send_json(200, {"status": "ok", "libresolveurl": LIBRESOLVEURL_AVAILABLE})
+              def do_POST(self):
+                  if not self.path.startswith("/resolve"):
+                      self._send_json(404, {"error": "Not found"})
+                      return
+                  try:
+                      length = int(self.headers.get("Content-Length", "0"))
+                      raw_body = self.rfile.read(length).decode("utf-8", errors="ignore")
+                      data = json.loads(raw_body) if raw_body else []
+                      links = data if isinstance(data, list) else data.get("links", [])
+                      results, fallbacks = [], []
+                      with ThreadPoolExecutor(max_workers=8) as ex:
+                          for res, fb in ex.map(resolve_single_item, links):
+                              if res:
+                                  results.append(res)
+                              elif fb:
+                                  fallbacks.append(fb)
+                      results.extend(fallbacks)
+                      self._send_json(200, results)
+                  except Exception as e:
+                      self._send_json(500, {"error": str(e)})
+
+          if __name__ == "__main__":
+              port = int(os.environ.get("RESOLVER_PORT", "8080"))
+              print(f"ResolveURL server starting on http://0.0.0.0:{port}")
+              sys.stdout.flush()
+              ThreadingHTTPServer(("0.0.0.0", port), ResolverHandler).serve_forever()
+          '''
+          with open(os.path.join(work, 'main.py'), 'w', encoding='utf-8') as f:
+              f.write('\n'.join(line[10:] if line.startswith('          ') else line for line in main_py.splitlines()))
+
+          shutil.make_archive('app/app', 'zip', work)
+          sha256_hash = hashlib.sha256(open('app/app.zip', 'rb').read()).hexdigest()
+          with open('app/app.zip.hash', 'w', encoding='utf-8') as f:
+              f.write(sha256_hash)
+          print('Rebuilt app/app.zip size:', os.path.getsize('app/app.zip'), 'hash:', sha256_hash)
+
+          print('=== 3. Patching webview_service.dart & filman_auth_repository.dart (HttpOnly cookies) ===')
+          p_wv = 'lib/core/services/webview_service.dart'
+          s_wv = open(p_wv, encoding='utf-8').read()
+          s_wv = s_wv.replace('incognito: true,', 'incognito: false,').replace('clearCache: true,', 'clearCache: false,')
+          old_cb = 'completer.complete(message[0].toString());'
+          new_cb = '''var msgStr = message[0].toString();
+                            try {
+                              final allCookies = await CookieManager.instance().getCookies(url: WebUri(url));
+                              if (allCookies.isNotEmpty) {
+                                final cookieStr = allCookies.map((c) => '${c.name}=${c.value}').join(';');
+                                if (msgStr.trim().startsWith('{')) {
+                                  msgStr = '{"success":true,"cookies":"$cookieStr"}';
+                                }
+                              }
+                            } catch (_) {}
+                            if (!completer.isCompleted) completer.complete(msgStr);'''
+          assert old_cb in s_wv, 'old_cb not found'
+          s_wv = s_wv.replace('callback: (message) {', 'callback: (message) async {').replace(old_cb, new_cb)
+          open(p_wv, 'w', encoding='utf-8').write(s_wv)
+
+          p_auth = 'lib/data/repositories/filman/filman_auth_repository.dart'
+          s_auth = open(p_auth, encoding='utf-8').read()
+          old_auth_cookies = '.map((header) => Cookie.fromSetCookieValue(header))'
+          new_auth_cookies = ".map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))"
+          assert old_auth_cookies in s_auth, 'old_auth_cookies not found'
+          s_auth = s_auth.replace(old_auth_cookies, new_auth_cookies)
+          open(p_auth, 'w', encoding='utf-8').write(s_auth)
+
+          print('=== 4. Patching filman_movie_repository.dart ===')
+          p_fmr = 'lib/data/repositories/filman/filman_movie_repository.dart'
+          s_fmr = open(p_fmr, encoding='utf-8').read()
+          old_fmr_dec = '''        final decoded = base64Decode(
+                      row.querySelector('a[data-iframe]')?.attributes['data-iframe'] ??
+                          '');
+                  link = (utf8.decode(decoded));'''.replace('            ', '  ')
+          s_fmr = s_fmr.replace('link = (utf8.decode(decoded));', '''final d = utf8.decode(decoded).trim(); if (d.startsWith('{')) { try { final dynamic m = jsonDecode(d); link = (m is Map ? (m['src'] ?? m['url'] ?? d) : d).toString().trim(); } catch (_) { link = d; } } else { link = d; } if (link.startsWith('//')) link = 'https:$link';''')
+          s_fmr = s_fmr.replace("return '';", 'return tempUrl;')
+          s_fmr = s_fmr.replace('if (tableData.length < 3) continue;', 'if (tableData.isEmpty) continue;')
+          open(p_fmr, 'w', encoding='utf-8').write(s_fmr)
+
+          print('=== 5. Patching resolve_url_service.dart ===')
+          p_rus = 'lib/core/services/resolve_url_service.dart'
+          s_rus = open(p_rus, encoding='utf-8').read()
+          s_rus = s_rus.replace('return [];', "return urls.where((u) => u.url.isNotEmpty).map((u) => VideoSource(url: u.url, lang: u.lang, quality: u.quality, host: 'Odtwarzacz (Web)', headers: const {'Referer': 'https://filman.cc/'})).toList();")
+          open(p_rus, 'w', encoding='utf-8').write(s_rus)
+
+          print('=== 6. Patching player_bloc.dart & player_screen.dart ===')
+          p_pb = 'lib/presentation/player/bloc/player_bloc.dart'
+          s_pb = open(p_pb, encoding='utf-8').read()
+          s_pb = s_pb.replace('// await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc', 'if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }')
+          s_pb = s_pb.replace('await _player.open(', "if (event.source.host.contains('(Web)')) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: '')); return; } await _player.open(")
+          s_pb = s_pb.replace("// Don't emit isPlaying yet - wait for buffering state change\n      emit(state.copyWith(", 'emit(state.copyWith(isBuffering: false, isPlaying: true,')
+          open(p_pb, 'w', encoding='utf-8').write(s_pb)
+
+          p_ps = 'lib/presentation/player/screens/player_screen.dart'
+          s_ps = "import 'package:flutter_inappwebview/flutter_inappwebview.dart';\n" + open(p_ps, encoding='utf-8').read()
+          anchor_ps = 'Widget _buildPlayerView(BuildContext context, PlayerState state) {'
+          assert anchor_ps in s_ps, 'anchor_ps not found'
+          web_branch = '''Widget _buildPlayerView(BuildContext context, PlayerState state) {
+              final bloc = context.read<PlayerBloc>();
+              final selectedUrl = state.selectedSource?.url ?? '';
+              final isWeb = (state.selectedSource?.host ?? '').contains('(Web)');
+              if (selectedUrl.isNotEmpty && isWeb) {
+                return Scaffold(
+                  backgroundColor: Colors.black,
+                  body: Stack(
+                    children: [
+                      InAppWebView(
+                        key: ValueKey(selectedUrl),
+                        initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: const {'Referer': 'https://filman.cc/'}),
+                        initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36'),
+                        onCreateWindow: (controller, action) async => false,
+                        shouldOverrideUrlLoading: (controller, nav) async {
+                          final u = nav.request.url?.toString() ?? '';
+                          if (!u.startsWith('http')) return NavigationActionPolicy.CANCEL;
+                          return NavigationActionPolicy.ALLOW;
+                        },
+                      ),
+                      SafeArea(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Container(
+                            color: Colors.black54,
+                            height: 48,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Row(
+                              children: [
+                                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.of(context).pop()),
+                                Expanded(child: Text('${state.selectedSource?.host ?? "Odtwarzacz"} • ${state.selectedSource?.quality ?? ""} ${state.selectedSource?.lang ?? ""}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                                if (state.videoSources != null && state.videoSources!.length > 1)
+                                  PopupMenuButton<VideoSource>(
+                                    icon: const Icon(Icons.settings, color: Colors.white),
+                                    onSelected: (source) => bloc.add(ChangeVideoSource(source: source)),
+                                    itemBuilder: (context) => state.videoSources!.map((source) => PopupMenuItem<VideoSource>(value: source, child: Text('${source.host}: ${source.quality} - ${source.lang}'))).toList(),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }'''
+          s_ps = s_ps.replace(anchor_ps, web_branch)
+          open(p_ps, 'w', encoding='utf-8').write(s_ps)
+          print('ALL 6 STEPS AND APP.ZIP REBUILD COMPLETED SUCCESSFULLY!')
+          PYEOF
 
       - name: Setup Java
         uses: actions/setup-java@v4
