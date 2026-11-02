@@ -69,13 +69,13 @@ jobs:
               try {
                 var response = await _dio.get(url);
                 var html = response.data.toString();
-                final redirectMatch = RegExp(r"window\.location\.href\s*=\s*['\"](https?://[^'\"]+)['\"]").firstMatch(html);
+                final redirectMatch = RegExp(r'''window\.location\.href\s*=\s*['"](https?://[^'"]+)['"]''').firstMatch(html);
                 if (redirectMatch != null) {
                   url = redirectMatch.group(1)!;
                   response = await _dio.get(url);
                   html = response.data.toString();
                 }
-                final hlsMatch = RegExp(r"['\"]hls['\"]\s*:\s*['\"]([^'\"]+)['\"]").firstMatch(html);
+                final hlsMatch = RegExp(r'''['"]hls['"]\s*:\s*['"]([^'"]+)['"]''').firstMatch(html);
                 if (hlsMatch != null) {
                   var hls = hlsMatch.group(1)!;
                   if (!hls.startsWith('http')) {
@@ -135,7 +135,14 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          set +e
+          flutter build apk --release 2>&1 | tee build_log.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::BUILD_ERROR_LOG: $(grep -E 'Error:|FAILURE:|What went wrong:|Exception' -A 5 build_log.txt | tr '\n' ' ')"
+            exit $EXIT_CODE
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
