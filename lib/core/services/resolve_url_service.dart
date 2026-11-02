@@ -26,6 +26,7 @@ class ResolveUrlService {
         .toList());
 
     try {
+      await _waitForServer();
       final response = await _dio.post(
         '$serverUrl/resolve',
         data: jsonEncode(urls
@@ -59,5 +60,25 @@ class ResolveUrlService {
       debugPrint('Error resolving URLs: $e');
       return [];
     }
+  }
+
+  /// Python resolver is started asynchronously at app launch, so on first use
+  /// it may not be listening yet. Poll /health for up to ~20 seconds.
+  Future<void> _waitForServer() async {
+    for (var i = 0; i < 40; i++) {
+      try {
+        final r = await _dio.get(
+          '$serverUrl/health',
+          options: Options(
+            receiveTimeout: const Duration(seconds: 2),
+            sendTimeout: const Duration(seconds: 2),
+            validateStatus: (_) => true,
+          ),
+        );
+        if (r.statusCode == 200) return;
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    debugPrint('Resolver server did not respond on /health');
   }
 }
