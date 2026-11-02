@@ -319,7 +319,6 @@ jobs:
           anchor_ps = 'Widget _buildPlayerView(BuildContext context, PlayerState state) {'
           assert anchor_ps in s_ps, 'anchor_ps not found'
           web_branch = '''Widget _buildPlayerView(BuildContext context, PlayerState state) {
-              final bloc = context.read<PlayerBloc>();
               final selectedUrl = state.selectedSource?.url ?? '';
               final isWeb = (state.selectedSource?.host ?? '').contains('(Web)');
               if (selectedUrl.isNotEmpty && isWeb) {
@@ -352,7 +351,7 @@ jobs:
                                 if (state.videoSources != null && state.videoSources!.length > 1)
                                   PopupMenuButton<VideoSource>(
                                     icon: const Icon(Icons.settings, color: Colors.white),
-                                    onSelected: (source) => bloc.add(ChangeVideoSource(source: source)),
+                                    onSelected: (source) => context.read<PlayerBloc>().add(ChangeVideoSource(source: source)),
                                     itemBuilder: (context) => state.videoSources!.map((source) => PopupMenuItem<VideoSource>(value: source, child: Text('${source.host}: ${source.quality} - ${source.lang}'))).toList(),
                                   ),
                               ],
@@ -366,6 +365,12 @@ jobs:
               }'''
           s_ps = s_ps.replace(anchor_ps, web_branch)
           open(p_ps, 'w', encoding='utf-8').write(s_ps)
+
+          p_ts = 'lib/presentation/settings/screens/theme_screen.dart'
+          if os.path.exists(p_ts):
+              s_ts = open(p_ts, encoding='utf-8').read().replace('activeThumbColor:', 'activeColor:')
+              open(p_ts, 'w', encoding='utf-8').write(s_ts)
+
           print('ALL 6 STEPS AND APP.ZIP REBUILD COMPLETED SUCCESSFULLY!')
           PYEOF
 
