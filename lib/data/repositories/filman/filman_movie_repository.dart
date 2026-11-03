@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/webview_service.dart';
 import 'package:flutter/material.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
@@ -18,7 +17,6 @@ import 'package:purevideo/di/injection_container.dart';
 class FilmanMovieRepository implements MovieRepository {
   final AuthRepository _authRepository =
       getIt<Map<SupportedService, AuthRepository>>()[SupportedService.filman]!;
-  final SettingsService _settingsService = getIt<SettingsService>();
   Dio? _dio;
 
   FilmanMovieRepository() {
@@ -96,29 +94,6 @@ class FilmanMovieRepository implements MovieRepository {
     return videoUrls;
   }
 
-  Future<bool> _verifyMovieHasLinks(String url) async {
-    if (_settingsService.isUrlLinkless(url)) return false;
-    if (_settingsService.isUrlVerified(url)) return true;
-    try {
-      final resp = await _dio!
-          .get(url)
-          .timeout(const Duration(seconds: 6));
-      final body = resp.data?.toString() ?? '';
-      if (body.isEmpty) return true;
-      final hasLinks =
-          body.contains('data-iframe') || body.contains('episode-list');
-      if (hasLinks) {
-        _settingsService.markUrlVerified(url);
-        return true;
-      } else {
-        _settingsService.markUrlLinkless(url);
-        return false;
-      }
-    } catch (_) {
-      return true;
-    }
-  }
-
   @override
   Future<List<ServiceMovieModel>> getMovies() async {
     await _prepareDio();
@@ -126,7 +101,7 @@ class FilmanMovieRepository implements MovieRepository {
     final response = await _dio!.get('/');
     final document = html.parse(response.data);
 
-    final candidates = <ServiceMovieModel>[];
+    final movies = <ServiceMovieModel>[];
 
     for (final list in document.querySelectorAll('div[id=item-list]')) {
       for (final item in list.children) {
@@ -154,12 +129,11 @@ class FilmanMovieRepository implements MovieRepository {
             imageUrl.isEmpty ||
             link.isEmpty ||
             link == 'Brak danych' ||
-            !link.startsWith('http') ||
-            _settingsService.isUrlLinkless(link)) {
+            !link.startsWith('http')) {
           continue;
         }
 
-        candidates.add(ServiceMovieModel(
+        movies.add(ServiceMovieModel(
           service: SupportedService.filman,
           title: rawTitle,
           imageUrl: imageUrl,
@@ -169,24 +143,7 @@ class FilmanMovieRepository implements MovieRepository {
       }
     }
 
-    // Verify in parallel batches of 10 so movies without links never appear on the Home Screen
-    final verified = <ServiceMovieModel>[];
-    const batchSize = 10;
-    for (var i = 0; i < candidates.length; i += batchSize) {
-      final end = (i + batchSize < candidates.length)
-          ? i + batchSize
-          : candidates.length;
-      final batch = candidates.sublist(i, end);
-      final checks = await Future.wait(
-        batch.map((m) async {
-          final ok = await _verifyMovieHasLinks(m.url);
-          return ok ? m : null;
-        }),
-      );
-      verified.addAll(checks.whereType<ServiceMovieModel>());
-    }
-
-    return verified;
+    return movies;
   }
 
   Future<List<HostLink>> _scrapeEpisodeVideoUrls(String episodeUrl) async {
@@ -263,12 +220,6 @@ class FilmanMovieRepository implements MovieRepository {
         }
       }
 
-      if (seasons.isEmpty) {
-        _settingsService.markUrlLinkless(url);
-        throw Exception('Ten serial nie posiada jeszcze dostępnych odcinków.');
-      }
-
-      _settingsService.markUrlVerified(url);
       return ServiceMovieDetailsModel(
         service: SupportedService.filman,
         url: url,
@@ -281,12 +232,7 @@ class FilmanMovieRepository implements MovieRepository {
     }
 
     final videoUrls = await _extractHostLinksFromDocument(document);
-    if (videoUrls.isEmpty) {
-      _settingsService.markUrlLinkless(url);
-      throw Exception('Ten film nie posiada jeszcze aktywnych linków wideo.');
-    }
 
-    _settingsService.markUrlVerified(url);
     final movieModel = ServiceMovieDetailsModel(
       service: SupportedService.filman,
       url: url,
@@ -303,9 +249,6 @@ class FilmanMovieRepository implements MovieRepository {
   @override
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     final videoUrls = await _scrapeEpisodeVideoUrls(episode.url);
-    if (videoUrls.isEmpty) {
-      throw Exception('Ten odcinek nie posiada jeszcze aktywnych linków wideo.');
-    }
     return episode.copyWith(videoUrls: videoUrls);
   }
 }

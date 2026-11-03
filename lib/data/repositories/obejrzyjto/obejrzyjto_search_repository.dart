@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/auth_model.dart';
 import 'package:purevideo/data/models/movie_model.dart';
@@ -12,7 +11,6 @@ import 'package:purevideo/di/injection_container.dart';
 class ObejrzyjtoSearchRepository extends SearchRepository {
   final AuthRepository _authRepository = getIt<
       Map<SupportedService, AuthRepository>>()[SupportedService.obejrzyjto]!;
-  final SettingsService _settingsService = getIt<SettingsService>();
 
   Dio? _dio;
 
@@ -30,22 +28,6 @@ class ObejrzyjtoSearchRepository extends SearchRepository {
     _dio ??= ObejrzyjtoDioFactory.getDio(
       _authRepository.getAccount(),
     );
-  }
-
-  bool _isValidStreamVideo(dynamic video) {
-    if (video is! Map) return false;
-    if (video['id'] == null) return false;
-    final src = (video['src'] ?? '').toString().toLowerCase().trim();
-    if (src.isEmpty ||
-        src.contains('youtube.com') ||
-        src.contains('youtu.be')) {
-      return false;
-    }
-    final cat = (video['category'] ?? '').toString().toLowerCase().trim();
-    if (cat == 'trailer' || cat == 'teaser' || cat == 'clip') {
-      return false;
-    }
-    return true;
   }
 
   @override
@@ -94,45 +76,14 @@ class ObejrzyjtoSearchRepository extends SearchRepository {
         if (titleObj is! Map) return null;
 
         final isSeries = titleObj['is_series']?.toString() == 'true';
-        final primaryVideo = titleObj['primary_video'];
-        final videosList = (titleObj['videos'] as List?) ?? const [];
+        final primaryVideoId = titleObj['primary_video']?['id'] as int?;
+        if (primaryVideoId == null) return null;
 
-        int? targetVideoId;
-        if (_isValidStreamVideo(primaryVideo)) {
-          targetVideoId = primaryVideo['id'] as int?;
-        } else {
-          for (final v in videosList) {
-            if (_isValidStreamVideo(v)) {
-              targetVideoId = v['id'] as int?;
-              if (targetVideoId != null) break;
-            }
-          }
-        }
-
-        if (isSeries) {
-          final seasonsCount = (titleObj['seasons_count'] as int?) ?? 0;
-          final seasonsList = (titleObj['seasons'] as List?) ?? const [];
-          if (seasonsCount <= 0 && seasonsList.isEmpty) {
-            return null;
-          }
-          targetVideoId ??= (primaryVideo is Map)
-              ? (primaryVideo['id'] as int?)
-              : (videosList.isNotEmpty && videosList.first is Map
-                  ? videosList.first['id'] as int?
-                  : null);
-        }
-
-        if (targetVideoId == null) return null;
-
-        final watchUrl = '/watch/$targetVideoId';
-        if (_settingsService.isUrlLinkless(watchUrl)) return null;
-
-        _settingsService.markUrlVerified(watchUrl);
         return ServiceMovieModel(
           service: SupportedService.obejrzyjto,
           title: title,
           imageUrl: imageUrl,
-          url: watchUrl,
+          url: '/watch/$primaryVideoId',
           category: isSeries ? 'Seriale' : 'Filmy',
         );
       } catch (_) {

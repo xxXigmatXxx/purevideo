@@ -11,7 +11,7 @@ class SettingsService {
   static const String _isDarkModeKey = 'isDarkMode';
   static const String _isSystemBrightnessKey = 'isSystemBrightness';
   static const String _myListKey = 'myListJson';
-  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v2';
+  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v3';
   static const String _linklessUrlsKey = 'linklessUrlsJson_v1';
   static const String _verifiedUrlsKey = 'verifiedUrlsJson_v1';
   static const String _uiStyleKey = 'uiStyle'; // 'netflix' or 'original'
@@ -20,8 +20,6 @@ class SettingsService {
   static const MethodChannel _iconChannel = MethodChannel('purevideo/app_icon');
 
   late final Box box;
-  final Set<String> _linklessUrls = {};
-  final Set<String> _verifiedUrls = {};
 
   Future<void> init() async {
     try {
@@ -30,69 +28,19 @@ class SettingsService {
       await Hive.deleteBoxFromDisk('settings');
       box = await Hive.openBox('settings');
     }
-    _loadUrlCaches();
-  }
-
-  void _loadUrlCaches() {
     try {
-      final rawLinkless = box.get(_linklessUrlsKey) as String?;
-      if (rawLinkless != null && rawLinkless.isNotEmpty) {
-        final list = (jsonDecode(rawLinkless) as List).map((e) => e.toString());
-        _linklessUrls.addAll(list);
-      }
-    } catch (_) {}
-    try {
-      final rawVerified = box.get(_verifiedUrlsKey) as String?;
-      if (rawVerified != null && rawVerified.isNotEmpty) {
-        final list = (jsonDecode(rawVerified) as List).map((e) => e.toString());
-        _verifiedUrls.addAll(list);
-      }
+      await box.delete(_linklessUrlsKey);
+      await box.delete(_verifiedUrlsKey);
     } catch (_) {}
   }
 
-  bool isUrlLinkless(String url) => _linklessUrls.contains(url.trim());
+  bool isUrlLinkless(String url) => false;
 
-  bool isUrlVerified(String url) => _verifiedUrls.contains(url.trim());
+  bool isUrlVerified(String url) => true;
 
-  void markUrlVerified(String url) {
-    final clean = url.trim();
-    if (clean.isEmpty) return;
-    if (_verifiedUrls.add(clean)) {
-      _linklessUrls.remove(clean);
-      try {
-        box.put(_verifiedUrlsKey, jsonEncode(_verifiedUrls.take(1500).toList()));
-      } catch (_) {}
-    }
-  }
+  void markUrlVerified(String url) {}
 
-  void markUrlLinkless(String url) {
-    final clean = url.trim();
-    if (clean.isEmpty) return;
-    if (_linklessUrls.add(clean)) {
-      _verifiedUrls.remove(clean);
-      try {
-        box.put(_linklessUrlsKey, jsonEncode(_linklessUrls.take(1500).toList()));
-      } catch (_) {}
-      // Also remove from cached home movies immediately
-      final cached = getCachedHomeMovies();
-      if (cached.isNotEmpty) {
-        final filtered = cached
-            .map((m) {
-              final validServices = m.services
-                  .where((s) => !_linklessUrls.contains(s.url.trim()))
-                  .toList();
-              return validServices.isEmpty
-                  ? null
-                  : MovieModel(services: validServices);
-            })
-            .whereType<MovieModel>()
-            .toList();
-        if (filtered.length != cached.length) {
-          setCachedHomeMovies(filtered);
-        }
-      }
-    }
-  }
+  void markUrlLinkless(String url) {}
 
   List<MovieModel> getCachedHomeMovies() {
     try {
@@ -110,8 +58,7 @@ class SettingsService {
                   final imageUrl = s['imageUrl']?.toString().trim() ?? '';
                   if (url.isEmpty ||
                       title.isEmpty ||
-                      title == 'Brak danych' ||
-                      _linklessUrls.contains(url)) {
+                      title == 'Brak danych') {
                     return null;
                   }
                   return ServiceMovieModel(
@@ -141,9 +88,7 @@ class SettingsService {
       final encoded = jsonEncode(movies
           .map((m) => {
                 'services': m.services
-                    .where((s) =>
-                        s.service != SupportedService.ekino &&
-                        !_linklessUrls.contains(s.url.trim()))
+                    .where((s) => s.service != SupportedService.ekino)
                     .map((s) => {
                           'service': s.service.name,
                           'url': s.url,
