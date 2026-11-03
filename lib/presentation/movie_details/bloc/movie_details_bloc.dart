@@ -57,9 +57,27 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           .toList();
 
       if (loggedServiceEntries.isNotEmpty) {
-        for (final loggedServiceEntry in loggedServiceEntries) {
-          final result =
-              await (() async { final q1 = event.movie.title.trim().isNotEmpty ? event.movie.title.trim() : event.movie.originalTitle.trim(); var r = await loggedServiceEntry.value.searchMovies(q1).timeout(const Duration(seconds: 7), onTimeout: () => []); if (r.isEmpty && event.movie.originalTitle.trim().isNotEmpty && event.movie.originalTitle.trim() != q1) { try { r = await loggedServiceEntry.value.searchMovies(event.movie.originalTitle.trim()).timeout(const Duration(seconds: 7), onTimeout: () => []); } catch (_) {} } return r; })();
+        final searchFutures = loggedServiceEntries.map((loggedServiceEntry) async {
+          final q1 = event.movie.title.trim().isNotEmpty
+              ? event.movie.title.trim()
+              : event.movie.originalTitle.trim();
+          var r = await loggedServiceEntry.value
+              .searchMovies(q1)
+              .timeout(const Duration(seconds: 7), onTimeout: () => []);
+          if (r.isEmpty &&
+              event.movie.originalTitle.trim().isNotEmpty &&
+              event.movie.originalTitle.trim() != q1) {
+            try {
+              r = await loggedServiceEntry.value
+                  .searchMovies(event.movie.originalTitle.trim())
+                  .timeout(const Duration(seconds: 7), onTimeout: () => []);
+            } catch (_) {}
+          }
+          return r;
+        }).toList();
+
+        final searchLists = await Future.wait(searchFutures);
+        for (final result in searchLists) {
           _mergeService.addFromServiceTemp(result, results);
         }
 
@@ -82,10 +100,12 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
     try {
       final services = <ServiceMovieDetailsModel>[];
 
+      final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
+
       for (final serivceMovie in event.movie.services) {
         final authRepository = _authRepositories[serivceMovie.service];
         if (authRepository == null) {
-          throw Exception('Brak obsługi serwisu ${serivceMovie.service}');
+          continue;
         }
 
         final account = authRepository.getAccount();
@@ -101,11 +121,24 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
         final movieRepository = _movieRepositories[serivceMovie.service];
         if (movieRepository == null) {
-          throw Exception('Brak obsługi serwisu ${serivceMovie.service}');
+          continue;
         }
 
-        final movie = await movieRepository.getMovieDetails(serivceMovie.url);
-        services.add(movie);
+        detailsFutures.add(() async {
+          try {
+            return await movieRepository.getMovieDetails(serivceMovie.url);
+          } catch (e) {
+            debugPrint('Error loading details from ${serivceMovie.service}: $e');
+            if (event.movie.services.length == 1) rethrow;
+            return null;
+          }
+        }());
+      }
+
+      services.addAll(
+          (await Future.wait(detailsFutures)).whereType<ServiceMovieDetailsModel>());
+      if (services.isEmpty) {
+        throw Exception('Nie udało się pobrać szczegółów z żadnego serwisu');
       }
 
       final MovieDetailsModel movie = MovieDetailsModel(services: services);
