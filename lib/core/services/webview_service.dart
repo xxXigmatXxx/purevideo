@@ -57,6 +57,17 @@ class WebViewService {
           return false;
         }
 
+        function pvRetry() {
+          window._ekinoRetries = (window._ekinoRetries || 0) + 1;
+          if (window._ekinoRetries > 3) {
+            var s0 = document.getElementById('pv-status');
+            if (s0) s0.textContent = 'Weryfikacja nieudana. Okno zamknie sie automatycznie.';
+            setTimeout(function() { window.flutter_inappwebview.callHandler('messageHandler', ''); }, 1500);
+            return;
+          }
+          setTimeout(function() { try { window.turnstile.reset(); } catch (e) {} }, 1200);
+        }
+
         function renderTurnstileWidget() {
           if (window._ekinoWidgetRendered) return;
           if (typeof window.turnstile === 'undefined' || !window.turnstile.render) return;
@@ -89,15 +100,11 @@ class WebViewService {
               .then(function(html) {
                 if (!extractAndFinish(html)) {
                   if (st2) st2.textContent = 'Ponawianie weryfikacji...';
-                  setTimeout(function() {
-                    try { window.turnstile.reset(); } catch (e) {}
-                  }, 1200);
+                  pvRetry();
                 }
               })
               .catch(function() {
-                setTimeout(function() {
-                  try { window.turnstile.reset(); } catch (e) {}
-                }, 1200);
+                pvRetry();
               });
             }
           });
