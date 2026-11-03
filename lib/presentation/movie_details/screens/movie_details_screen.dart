@@ -459,7 +459,7 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                   imageUrl: '',
                   isSeries: true,
                   videoUrls:
-                      eps.expand((e) => e.videoUrls ?? const []).toList(),
+                      eps.expand((e) => e.videoUrls!).toList(),
                 ),
               ],
             );
