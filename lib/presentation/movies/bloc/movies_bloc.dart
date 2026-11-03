@@ -63,6 +63,7 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
       }
 
       final merge = getIt<MergeService>();
+      final loadErrors = <String>[];
 
       // Fetch movies from all logged-in services in parallel instead of sequentially
       final loggedServiceEntries = _repositories.entries
@@ -77,9 +78,10 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
               try {
                 return await entry.value
                     .getMovies()
-                    .timeout(const Duration(seconds: 45));
+                    .timeout(const Duration(seconds: 100));
               } catch (e) {
                 debugPrint('Failed to load movies from ${entry.key}: $e');
+                loadErrors.add('${entry.key.displayName}: $e');
                 return <ServiceMovieModel>[];
               }
             })
@@ -111,7 +113,9 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
       }));
 
       if (_movies.isEmpty) {
-        emit(const MoviesError('Brak dostępnych filmów'));
+        emit(MoviesError(loadErrors.isNotEmpty
+            ? 'Nie udalo sie zaladowac filmow:\n${loadErrors.join('\n')}'
+            : 'Brak dostepnych filmow'));
       } else {
         emit(MoviesLoaded(_movies));
       }
