@@ -260,34 +260,516 @@ jobs:
               f.write(sha256_hash)
           print('Rebuilt app/app.zip size:', os.path.getsize('app/app.zip'), 'hash:', sha256_hash)
 
-          print('=== 3. Patching webview_service.dart & filman_auth_repository.dart (HttpOnly cookies) ===')
+          print('=== 2b. Removing Version/4.0 and ; wv from all User-Agents across lib/ ===')
+          clean_ua = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+          old_ua = 'Mozilla/5.0 (Linux; Android 16; Pixel 8 Build/BP31.250610.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36'
+          for root_dir, _, file_list in os.walk('lib'):
+              for fn in file_list:
+                  if fn.endswith('.dart'):
+                      fp = os.path.join(root_dir, fn)
+                      txt = open(fp, encoding='utf-8').read()
+                      if old_ua in txt:
+                          txt = txt.replace(old_ua, clean_ua)
+                          open(fp, 'w', encoding='utf-8').write(txt)
+
+          print('=== 3. Patching supported_enum.dart, webview_service.dart & filman_auth_repository.dart ===')
+          p_enum = 'lib/core/utils/supported_enum.dart'
+          s_enum = open(p_enum, encoding='utf-8').read()
+          s_enum = s_enum.replace("https://ekino-tv.pl", "https://ekino.ws").replace("Ekino-tv.pl", "Ekino.ws")
+          s_enum = s_enum.replace("SupportedService.ekino => false,", "SupportedService.ekino => true,")
+          s_enum = s_enum.replace("{'g-recaptcha-response': InputType.recaptcha},", "")
+          open(p_enum, 'w', encoding='utf-8').write(s_enum)
+
+          def write_dart(path, text):
+              cleaned = '\n'.join(l[10:] if l.startswith('          ') else l for l in text.splitlines())
+              open(path, 'w', encoding='utf-8').write(cleaned)
+
           p_wv = 'lib/core/services/webview_service.dart'
-          s_wv = open(p_wv, encoding='utf-8').read()
-          s_wv = s_wv.replace('incognito: true,', 'incognito: false,').replace('clearCache: true,', 'clearCache: false,')
-          old_cb = 'completer.complete(message[0].toString());'
-          new_cb = '''var msgStr = message[0].toString();
+          new_wv = """import 'dart:async';
+          import 'dart:convert';
+          import 'dart:io' as io;
+          import 'package:collection/collection.dart';
+          import 'package:flutter/material.dart';
+          import 'package:html/dom.dart' as dom;
+          import 'package:purevideo/core/utils/global_context.dart';
+          import 'package:purevideo/di/injection_container.dart';
+          import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+
+          class WebViewService {
+            static const String cleanUserAgent = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+            String _getJsCodeForElement(String elementSelector) {
+              return '''
+                (function() {
+                  function waitForElement(selector, callback) {
+                    const element = document.querySelector(selector);
+                    if (element) {
+                      callback(element);
+                    } else {
+                      setTimeout(() => waitForElement(selector, callback), 100);
+                    }
+                  }
+                  waitForElement('$elementSelector', function(element) {
+                    window.flutter_inappwebview.callHandler('messageHandler', element.outerHTML);
+                  });
+                })();
+              ''';
+            }
+
+            Future<dom.Element?> waitForDomElement(String url, String elementSelector) async {
+              final completer = Completer<dom.Element?>();
+              executeJavaScript(url, _getJsCodeForElement(elementSelector)).then((result) {
+                if (result != null) {
+                  final document = dom.Document.html(result);
+                  final element = document.querySelector(elementSelector);
+                  completer.complete(element);
+                } else {
+                  completer.complete(null);
+                }
+              }).catchError((error) {
+                debugPrint('Error waiting for DOM element: $error');
+                completer.complete(null);
+              });
+              return completer.future;
+            }
+
+            Future<String?> executeJavaScript(String url, String jsCode) async {
+              final completer = Completer<String?>();
+              showDialog(
+                context: getIt<GlobalContext>().context,
+                barrierDismissible: false,
+                builder: (context) => _buildWebViewDialog(context, url, jsCode, completer),
+              );
+              return completer.future;
+            }
+
+            Future<List<io.Cookie>?> getCfCookies(String url, {List<io.Cookie>? initialCookies}) async {
+              final completer = Completer<List<io.Cookie>?>();
+              Future.delayed(const Duration(seconds: 6), () {
+                if (!completer.isCompleted) completer.complete(null);
+              });
+              showDialog(
+                context: getIt<GlobalContext>().context,
+                builder: (context) {
+                  return Dialog(
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    insetPadding: EdgeInsets.zero,
+                    child: SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height,
+                      child: InAppWebView(
+                        initialUrlRequest: URLRequest(url: WebUri(url)),
+                        initialSettings: InAppWebViewSettings(
+                          userAgent: cleanUserAgent,
+                          transparentBackground: true,
+                          javaScriptEnabled: true,
+                          domStorageEnabled: true,
+                          clearCache: false,
+                          cacheEnabled: true,
+                          incognito: false,
+                          useShouldInterceptRequest: true,
+                        ),
+                        onWebViewCreated: (controller) async {
+                          if (initialCookies != null && initialCookies.isNotEmpty) {
+                            for (io.Cookie cookie in initialCookies) {
+                              await CookieManager.instance().setCookie(
+                                name: cookie.name,
+                                url: WebUri(url),
+                                value: cookie.value,
+                                domain: cookie.domain,
+                              );
+                            }
+                          }
+                        },
+                        shouldInterceptRequest: (controller, request) async {
+                          if (!request.url.rawValue.contains(url)) return null;
+                          final cookies = await CookieManager.instance().getCookies(url: request.url);
+                          final cfClearance = cookies.firstWhereOrNull((c) => c.name == 'cf_clearance');
+                          if (cfClearance != null && !completer.isCompleted) {
+                            completer.complete(cookies.map((c) => io.Cookie(c.name, c.value)).toList());
+                            if (context.mounted) Navigator.of(context).pop();
+                          }
+                          return null;
+                        },
+                        onLoadStop: (controller, loadedUrl) async {
+                          try {
+                            if (loadedUrl == null) return;
+                            final cookies = await CookieManager.instance().getCookies(url: loadedUrl);
+                            final cfClearance = cookies.firstWhereOrNull((c) => c.name == 'cf_clearance');
+                            if (cfClearance != null && !completer.isCompleted) {
+                              completer.complete(cookies.map((c) => io.Cookie(c.name, c.value)).toList());
+                              if (context.mounted) Navigator.of(context).pop();
+                            }
+                          } catch (_) {
+                            if (context.mounted) Navigator.of(context).pop();
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                },
+              );
+              return completer.future;
+            }
+
+            Widget _buildWebViewDialog(BuildContext context, String url, String jsCode, Completer<String?> completer) {
+              final isLogin = url.contains('logowanie') || url.contains('login');
+              return Dialog(
+                backgroundColor: isLogin ? const Color(0xFF0F172A) : Colors.transparent,
+                elevation: 0,
+                insetPadding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.height,
+                  child: Column(
+                    children: [
+                      if (isLogin)
+                        SafeArea(
+                          bottom: false,
+                          child: Container(
+                            color: const Color(0xFF1E293B),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.white),
+                                  onPressed: () {
+                                    if (!completer.isCompleted) {
+                                      completer.complete('{"success":false,"error":"Anulowano logowanie"}');
+                                    }
+                                    if (context.mounted) Navigator.of(context).pop();
+                                  },
+                                ),
+                                const Expanded(
+                                  child: Text(
+                                    'Potwierdź Captcha i kliknij Zaloguj',
+                                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: InAppWebView(
+                          initialUrlRequest: URLRequest(url: WebUri(url)),
+                          initialSettings: InAppWebViewSettings(
+                            userAgent: cleanUserAgent,
+                            transparentBackground: !isLogin,
+                            supportZoom: true,
+                            disableContextMenu: false,
+                            disableHorizontalScroll: false,
+                            disableVerticalScroll: false,
+                            javaScriptEnabled: true,
+                            domStorageEnabled: true,
+                            databaseEnabled: true,
+                            clearCache: false,
+                            cacheEnabled: true,
+                            incognito: false,
+                            thirdPartyCookiesEnabled: true,
+                          ),
+                          onWebViewCreated: (controller) async {
+                            controller.addJavaScriptHandler(
+                              handlerName: 'messageHandler',
+                              callback: (message) async {
+                                if (message.isNotEmpty && message[0] != null) {
+                                  var msgStr = message[0].toString();
+                                  if (msgStr.contains('"success":true') || msgStr.contains('"success": true')) {
+                                    try {
+                                      final origin = Uri.parse(url).origin;
+                                      final allCookies = await CookieManager.instance().getCookies(url: WebUri(origin));
+                                      if (allCookies.isNotEmpty) {
+                                        final cookieStr = allCookies.map((c) => '${c.name}=${c.value}').join('; ');
+                                        msgStr = jsonEncode({'success': true, 'cookies': cookieStr});
+                                      }
+                                    } catch (_) {}
+                                  }
+                                  if (!completer.isCompleted) {
+                                    completer.complete(msgStr);
+                                    if (context.mounted) Navigator.of(context).pop();
+                                  }
+                                }
+                              },
+                            );
+                          },
+                          onLoadStop: (controller, loadedUrl) async {
                             try {
-                              final allCookies = await CookieManager.instance().getCookies(url: WebUri(url));
-                              if (allCookies.isNotEmpty) {
-                                final cookieStr = allCookies.map((c) => '${c.name}=${c.value}').join(';');
-                                if (msgStr.trim().startsWith('{')) {
-                                  msgStr = '{"success":true,"cookies":"$cookieStr"}';
+                              final cur = loadedUrl?.toString() ?? '';
+                              if (url.contains('filman.cc/logowanie') &&
+                                  cur.contains('filman.cc') &&
+                                  !cur.contains('/logowanie') &&
+                                  !cur.contains('/rejestracja') &&
+                                  !cur.contains('/przypomnij')) {
+                                final html = await controller.evaluateJavascript(source: 'document.documentElement.innerHTML');
+                                if (html != null && (html.toString().contains('wyloguj') || html.toString().contains('item-list'))) {
+                                  final allCookies = await CookieManager.instance().getCookies(url: WebUri('https://filman.cc'));
+                                  if (allCookies.isNotEmpty && !completer.isCompleted) {
+                                    final cookieStr = allCookies.map((c) => '${c.name}=${c.value}').join('; ');
+                                    completer.complete(jsonEncode({'success': true, 'cookies': cookieStr}));
+                                    if (context.mounted) Navigator.of(context).pop();
+                                    return;
+                                  }
                                 }
                               }
-                            } catch (_) {}
-                            if (!completer.isCompleted) completer.complete(msgStr);'''
-          assert old_cb in s_wv, 'old_cb not found'
-          s_wv = s_wv.replace('callback: (message) {', 'callback: (message) async {').replace(old_cb, new_cb)
-          s_wv = s_wv.replace('final completer = Completer<List<io.Cookie>?>();', 'final completer = Completer<List<io.Cookie>?>(); Future.delayed(const Duration(seconds: 6), () { if (!completer.isCompleted) completer.complete(null); });')
-          open(p_wv, 'w', encoding='utf-8').write(s_wv)
+                              await controller.evaluateJavascript(source: jsCode);
+                            } catch (e) {
+                              debugPrint('Błąd wykonywania JavaScript: $e');
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+          """
+          write_dart(p_wv, new_wv)
 
           p_auth = 'lib/data/repositories/filman/filman_auth_repository.dart'
-          s_auth = open(p_auth, encoding='utf-8').read()
-          old_auth_cookies = '.map((header) => Cookie.fromSetCookieValue(header))'
-          new_auth_cookies = ".map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))"
-          assert old_auth_cookies in s_auth, 'old_auth_cookies not found'
-          s_auth = s_auth.replace(old_auth_cookies, new_auth_cookies)
-          open(p_auth, 'w', encoding='utf-8').write(s_auth)
+          new_f_auth = """import 'dart:convert';
+          import 'dart:async';
+          import 'dart:io';
+          import 'package:dio/dio.dart';
+          import 'package:flutter/material.dart';
+          import 'package:purevideo/core/services/webview_service.dart';
+          import 'package:purevideo/core/utils/supported_enum.dart';
+          import 'package:purevideo/data/models/account_model.dart';
+          import 'package:purevideo/data/models/auth_model.dart';
+          import 'package:purevideo/data/repositories/auth_repository.dart';
+          import 'package:purevideo/data/repositories/filman/filman_dio_factory.dart';
+          import 'package:purevideo/core/services/secure_storage_service.dart';
+          import 'package:purevideo/di/injection_container.dart';
+
+          class FilmanAuthRepository implements AuthRepository {
+            late Dio _dio;
+            AccountModel? _account;
+            final _authController = StreamController<AuthModel>.broadcast();
+            late StreamSubscription<AuthModel> _authSubscription;
+
+            FilmanAuthRepository([AccountModel? account]) {
+              _loadSavedAccount();
+              _authSubscription = _authController.stream.listen(_onAuthChanged);
+            }
+
+            Future<void> _loadSavedAccount() async {
+              try {
+                final accountJson = await SecureStorageService.getServiceData(
+                  SupportedService.filman,
+                  'account',
+                );
+                if (accountJson != null) {
+                  _account = AccountModel.fromMap(jsonDecode(accountJson));
+                  _dio = FilmanDioFactory.getDio(_account);
+                  try {
+                    final res = await _dio.get('/');
+                    final body = res.data?.toString() ?? '';
+                    final loc = res.headers.map['location']?.join(' ') ?? '';
+                    if (res.statusCode == 302 || res.statusCode == 301 || loc.contains('logowanie') || (!body.contains('wyloguj') && !body.contains('Just a moment'))) {
+                      throw Exception('Sesja Filman wygasła lub była niepełna');
+                    }
+                    _authController.add(
+                      AuthModel(
+                        service: SupportedService.filman,
+                        success: true,
+                        account: _account,
+                      ),
+                    );
+                  } catch (e) {
+                    await SecureStorageService.deleteServiceData(
+                      SupportedService.filman,
+                      'account',
+                    );
+                    _account = null;
+                    _dio = FilmanDioFactory.getDio(null);
+                  }
+                } else {
+                  _dio = FilmanDioFactory.getDio(null);
+                }
+              } catch (e) {
+                debugPrint('Błąd podczas ładowania konta Filman.cc: $e');
+                _dio = FilmanDioFactory.getDio(null);
+              }
+            }
+
+            void _onAuthChanged(AuthModel auth) {
+              if (auth.service == SupportedService.filman) {
+                _dio = FilmanDioFactory.getDio(auth.account);
+              }
+            }
+
+            @override
+            Stream<AuthModel> get authStream => _authController.stream;
+
+            String _getFilmanLoginScript(String login, String password) {
+              final safeLogin = login.replaceAll("'", "\\'");
+              final safePass = password.replaceAll("'", "\\'");
+              return '''
+                (function() {
+                  try {
+                    const st = document.createElement('style');
+                    st.innerHTML = '#outdated, .outdated-browser, .browser-Gate { display: none !important; }';
+                    if (document.head) document.head.appendChild(st);
+                  } catch (_) {}
+
+                  if (!window.location.href.includes('/logowanie') &&
+                      (document.querySelector('a[href*="wyloguj"]') || document.querySelector('#item-list'))) {
+                    window.flutter_inappwebview.callHandler('messageHandler', JSON.stringify({success: true, cookies: document.cookie}));
+                    return;
+                  }
+
+                  function setupForm() {
+                    const form = document.querySelector('#signin-form') || document.querySelector('form[action*="logowanie"]');
+                    if (!form) {
+                      setTimeout(setupForm, 200);
+                      return;
+                    }
+                    const lInput = form.querySelector('input[name="login"]') || form.login;
+                    const pInput = form.querySelector('input[name="password"]') || form.password;
+                    if (lInput && !lInput.value) lInput.value = '$safeLogin';
+                    if (pInput && !pInput.value) pInput.value = '$safePass';
+
+                    if (!window._filmanCaptchaTimer) {
+                      window._filmanCaptchaTimer = setInterval(function() {
+                        const g = document.querySelector('[name="g-recaptcha-response"]');
+                        const c = document.querySelector('[name="cf-turnstile-response"]');
+                        const val = (g && g.value) || (c && c.value) || '';
+                        if (val && val.length > 20 && !window._filmanSubmittedOnce) {
+                          window._filmanSubmittedOnce = true;
+                          clearInterval(window._filmanCaptchaTimer);
+                          const btn = form.querySelector("button[name='submit']") || form.querySelector("button[type='submit']") || form.querySelector("input[type='submit']");
+                          if (btn) btn.click();
+                        }
+                      }, 400);
+                    }
+                  }
+                  setupForm();
+                })();
+              ''';
+            }
+
+            @override
+            Future<AuthModel> signIn(Map<String, String> fields) async {
+              try {
+                final webviewLogin = await getIt<WebViewService>().executeJavaScript(
+                  '${SupportedService.filman.baseUrl}/logowanie',
+                  _getFilmanLoginScript(fields['login'] ?? '', fields['password'] ?? ''),
+                );
+                final json = jsonDecode(webviewLogin!);
+                if (json['success'] == true && json['cookies'] != null) {
+                  final cookieList = (json['cookies'] as String).split(';');
+                  final cookies = cookieList
+                      .map((h) => h.trim())
+                      .where((h) => h.contains('=') && !h.startsWith('='))
+                      .map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+                      .toList();
+                  _account = AccountModel(
+                    fields: fields,
+                    cookies: cookies,
+                    service: SupportedService.filman,
+                  );
+                  final authModel = AuthModel(
+                    service: SupportedService.filman,
+                    success: true,
+                    account: _account,
+                  );
+                  _authController.add(authModel);
+                  return authModel;
+                } else {
+                  final authModel = AuthModel(
+                    service: SupportedService.filman,
+                    success: false,
+                    error: [json['error'] ?? 'Logowanie nie powiodło się'],
+                  );
+                  _authController.add(authModel);
+                  return authModel;
+                }
+              } catch (e) {
+                final authModel = AuthModel(
+                  service: SupportedService.filman,
+                  success: false,
+                  error: ['Błąd logowania: $e'],
+                );
+                _authController.add(authModel);
+                return authModel;
+              }
+            }
+
+            @override
+            AccountModel? getAccount() => _account;
+
+            @override
+            Future<void> setAccount(AccountModel account) async {
+              _account = account;
+              _dio = FilmanDioFactory.getDio(_account);
+              await SecureStorageService.saveServiceData(
+                SupportedService.filman,
+                'account',
+                jsonEncode(account.toMap()),
+              );
+              _authController.add(AuthModel(service: SupportedService.filman, success: true, account: _account));
+            }
+
+            @override
+            Future<void> signOut() async {
+              _account = null;
+              _dio = FilmanDioFactory.getDio(null);
+              _authController.add(AuthModel(service: SupportedService.filman, success: false, account: null));
+              await SecureStorageService.deleteServiceData(SupportedService.filman, 'account');
+            }
+
+            void dispose() {
+              _authSubscription.cancel();
+              _authController.close();
+            }
+          }
+          """
+          write_dart(p_auth, new_f_auth)
+
+          p_fdio = 'lib/data/repositories/filman/filman_dio_factory.dart'
+          s_fdio = open(p_fdio, encoding='utf-8').read()
+          s_fdio = s_fdio.replace('.map((cookie) => Cookie.fromSetCookieValue(cookie))', ".map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))")
+          open(p_fdio, 'w', encoding='utf-8').write(s_fdio)
+
+          print('=== 3b. Patching Ekino (ekino.ws domain, auto-guest, fast HTTP link extractor) ===')
+          p_edio = 'lib/data/repositories/ekino/ekino_dio_factory.dart'
+          s_edio = open(p_edio, encoding='utf-8').read().replace('followRedirects: false,', 'followRedirects: true,')
+          open(p_edio, 'w', encoding='utf-8').write(s_edio)
+
+          p_eauth = 'lib/data/repositories/ekino/ekino_auth_repository.dart'
+          s_eauth = open(p_eauth, encoding='utf-8').read()
+          s_eauth = s_eauth.replace('_dio = EkinoDioFactory.getDio(null);', """_account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));""")
+          s_eauth = s_eauth.replace("if (response.headers['set-cookie'] != null) {", "if (true) {")
+          s_eauth = s_eauth.replace('.map((header) => Cookie.fromSetCookieValue(header))', ".map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))")
+          open(p_eauth, 'w', encoding='utf-8').write(s_eauth)
+
+          p_esearch = 'lib/data/repositories/ekino/ekino_search_repository.dart'
+          s_esearch = open(p_esearch, encoding='utf-8').read()
+          s_esearch = s_esearch.replace("https://ekino-tv.pl", "https://ekino.ws").replace("'/search/qf'", "'/search/qf/'")
+          s_esearch = s_esearch.replace("if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {", "if (imageUrl.startsWith('//')) { fullImageUrl = 'https:$imageUrl'; } else if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {")
+          open(p_esearch, 'w', encoding='utf-8').write(s_esearch)
+
+          p_emovie = 'lib/data/repositories/ekino/ekino_movie_repository.dart'
+          s_emovie = open(p_emovie, encoding='utf-8').read()
+          s_emovie = s_emovie.replace('SupportedService.obejrzyjto', 'SupportedService.ekino').replace('https://ekino-tv.pl', 'https://ekino.ws')
+          new_ekino_gate = """final gateUrl = '/watch/f/$hostName/$hostId';
+                String? videoUrl;
+                try {
+                  final gateResp = await _dio!.get(gateUrl);
+                  final gateDoc = html.parse(gateResp.data);
+                  videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ?? gateDoc.querySelector('a[href*="http"]')?.attributes['href'];
+                  if (videoUrl != null && videoUrl.contains('ekino.link')) {
+                    final linkResp = await Dio(BaseOptions(headers: {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36', 'Referer': 'https://ekino.ws/'}, connectTimeout: const Duration(seconds: 4), receiveTimeout: const Duration(seconds: 4), validateStatus: (_) => true)).get(videoUrl);
+                    final linkDoc = html.parse(linkResp.data);
+                    final ifr = linkDoc.querySelector('iframe')?.attributes['src'];
+                    if (ifr != null && ifr.isNotEmpty) videoUrl = ifr;
+                  }
+                } catch (_) {}"""
+          s_emovie = re.sub(r"final gateUrl = '/watch/f/\$hostName/\$hostId';[\s\S]*?\?\.attributes\['href'\];", new_ekino_gate, s_emovie)
+          open(p_emovie, 'w', encoding='utf-8').write(s_emovie)
 
           print('=== 4. Patching filman_movie_repository.dart ===')
           p_fmr = 'lib/data/repositories/filman/filman_movie_repository.dart'
@@ -328,7 +810,7 @@ jobs:
                       InAppWebView(
                         key: ValueKey(selectedUrl),
                         initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: const {'Referer': 'https://filman.cc/'}),
-                        initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36'),
+                        initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'),
                         onCreateWindow: (controller, action) async => false,
                         shouldOverrideUrlLoading: (controller, nav) async {
                           final u = nav.request.url?.toString() ?? '';
