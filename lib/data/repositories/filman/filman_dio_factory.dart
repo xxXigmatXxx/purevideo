@@ -33,6 +33,12 @@ class FilmanDioFactory {
     );
     dio.interceptors.add(
       InterceptorsWrapper(
+        onRequest: (options, handler) {
+          // Cloudflare clearance is bound to the User-Agent: always send the
+          // same UA the WebView used to solve the challenge.
+          options.headers['User-Agent'] = WebViewService.cleanUserAgent;
+          handler.next(options);
+        },
         onResponse: (response, handler) async {
           if (response.data.toString().contains('Just a moment...')) {
             // Never loop: one Cloudflare retry per request, and a cooldown
