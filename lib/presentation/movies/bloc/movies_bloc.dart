@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
@@ -70,7 +71,18 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
 
       if (loggedServiceEntries.isNotEmpty) {
         final movieFutures = loggedServiceEntries
-            .map((entry) => entry.value.getMovies())
+            .map((entry) async {
+              // One slow/blocked service (e.g. Cloudflare) must not break the
+              // others or leave the home screen loading forever.
+              try {
+                return await entry.value
+                    .getMovies()
+                    .timeout(const Duration(seconds: 45));
+              } catch (e) {
+                debugPrint('Failed to load movies from ${entry.key}: $e');
+                return <ServiceMovieModel>[];
+              }
+            })
             .toList();
 
         // Wait for all API calls to complete in parallel, but continue even if one fails
