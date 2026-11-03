@@ -36,25 +36,50 @@ class _ThemeScreenState extends State<ThemeScreen> {
     IconData? icon,
   }) {
     return Container(
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(9),
         border: Border.all(color: Colors.white24, width: 1),
       ),
       alignment: Alignment.center,
       child: icon != null
-          ? Icon(icon, color: fg, size: 22)
+          ? Icon(icon, color: fg, size: 20)
           : Text(
               letter,
               style: TextStyle(
                 color: fg,
                 fontWeight: FontWeight.w900,
-                fontSize: 22,
+                fontSize: 20,
                 height: 1.0,
               ),
             ),
+    );
+  }
+
+  Widget _buildIconRadio({
+    required String value,
+    required String groupValue,
+    required String displayName,
+    required Widget badge,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        badge,
+        const SizedBox(width: 4),
+        Radio<String>(
+          value: value,
+          groupValue: groupValue,
+          activeColor: const Color(0xFFE50914),
+          onChanged: (val) {
+            if (val != null) {
+              _selectAppIcon(val, displayName);
+            }
+          },
+        ),
+      ],
     );
   }
 
@@ -182,109 +207,73 @@ class _ThemeScreenState extends State<ThemeScreen> {
                 SettingsSection(
                   title: 'Ikona i nazwa aplikacji',
                   items: [
-                    ListTile(
-                      leading: _buildIconBadge(
-                        bg: const Color(0xFF4A148C),
-                        fg: Colors.white,
-                        letter: 'P',
-                      ),
-                      title: const Text(
-                        'Oryginalna (PureVideo)',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: const Text(
-                        'Domyślna ikona i nazwa „PureVideo”',
-                      ),
-                      trailing: Radio<String>(
+                    SettingsItem(
+                      icon: Icons.apps_rounded,
+                      title: 'Oryginalna (PureVideo)',
+                      subtitle: 'Domyślna ikona i nazwa „PureVideo”',
+                      onTap: () => _selectAppIcon('default', 'PureVideo'),
+                      trailing: _buildIconRadio(
                         value: 'default',
                         groupValue: currentIcon,
-                        activeColor: const Color(0xFFE50914),
-                        onChanged: (val) {
-                          if (val != null) {
-                            _selectAppIcon(val, 'PureVideo');
-                          }
-                        },
+                        displayName: 'PureVideo',
+                        badge: _buildIconBadge(
+                          bg: const Color(0xFF4A148C),
+                          fg: Colors.white,
+                          letter: 'P',
+                        ),
                       ),
-                      onTap: () => _selectAppIcon('default', 'PureVideo'),
                     ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: _buildIconBadge(
-                        bg: const Color(0xFF000000),
-                        fg: const Color(0xFFE50914),
-                        letter: 'N',
-                      ),
-                      title: const Text(
-                        'Netflix',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: const Text(
-                        'Czerwone logo „N” oraz nazwa aplikacji „Netflix”',
-                      ),
-                      trailing: Radio<String>(
+                    SettingsItem(
+                      icon: Icons.tv_rounded,
+                      title: 'Netflix',
+                      subtitle:
+                          'Czerwone logo „N” oraz nazwa aplikacji „Netflix”',
+                      onTap: () => _selectAppIcon('netflix', 'Netflix'),
+                      trailing: _buildIconRadio(
                         value: 'netflix',
                         groupValue: currentIcon,
-                        activeColor: const Color(0xFFE50914),
-                        onChanged: (val) {
-                          if (val != null) {
-                            _selectAppIcon(val, 'Netflix');
-                          }
-                        },
+                        displayName: 'Netflix',
+                        badge: _buildIconBadge(
+                          bg: const Color(0xFF000000),
+                          fg: const Color(0xFFE50914),
+                          letter: 'N',
+                        ),
                       ),
-                      onTap: () => _selectAppIcon('netflix', 'Netflix'),
                     ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: _buildIconBadge(
-                        bg: const Color(0xFF10131A),
-                        fg: const Color(0xFFE50914),
-                        letter: 'O',
-                        icon: Icons.play_circle_fill,
-                      ),
-                      title: const Text(
-                        'Obejrzyj.to',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: const Text(
-                        'Ikona odtwarzacza oraz nazwa aplikacji „Obejrzyj.to”',
-                      ),
-                      trailing: Radio<String>(
+                    SettingsItem(
+                      icon: Icons.play_circle_outline_rounded,
+                      title: 'Obejrzyj.to',
+                      subtitle:
+                          'Ikona odtwarzacza oraz nazwa aplikacji „Obejrzyj.to”',
+                      onTap: () => _selectAppIcon('obejrzyjto', 'Obejrzyj.to'),
+                      trailing: _buildIconRadio(
                         value: 'obejrzyjto',
                         groupValue: currentIcon,
-                        activeColor: const Color(0xFFE50914),
-                        onChanged: (val) {
-                          if (val != null) {
-                            _selectAppIcon(val, 'Obejrzyj.to');
-                          }
-                        },
+                        displayName: 'Obejrzyj.to',
+                        badge: _buildIconBadge(
+                          bg: const Color(0xFF10131A),
+                          fg: const Color(0xFFE50914),
+                          letter: 'O',
+                          icon: Icons.play_circle_fill,
+                        ),
                       ),
-                      onTap: () => _selectAppIcon('obejrzyjto', 'Obejrzyj.to'),
                     ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: _buildIconBadge(
-                        bg: const Color(0xFF0B192C),
-                        fg: const Color(0xFF1E88E5),
-                        letter: 'F',
-                      ),
-                      title: const Text(
-                        'Filman.cc',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: const Text(
-                        'Niebieskie logo „F” oraz nazwa aplikacji „Filman.cc”',
-                      ),
-                      trailing: Radio<String>(
+                    SettingsItem(
+                      icon: Icons.local_movies_outlined,
+                      title: 'Filman.cc',
+                      subtitle:
+                          'Niebieskie logo „F” oraz nazwa aplikacji „Filman.cc”',
+                      onTap: () => _selectAppIcon('filman', 'Filman.cc'),
+                      trailing: _buildIconRadio(
                         value: 'filman',
                         groupValue: currentIcon,
-                        activeColor: const Color(0xFFE50914),
-                        onChanged: (val) {
-                          if (val != null) {
-                            _selectAppIcon(val, 'Filman.cc');
-                          }
-                        },
+                        displayName: 'Filman.cc',
+                        badge: _buildIconBadge(
+                          bg: const Color(0xFF0B192C),
+                          fg: const Color(0xFF1E88E5),
+                          letter: 'F',
+                        ),
                       ),
-                      onTap: () => _selectAppIcon('filman', 'Filman.cc'),
                     ),
                   ],
                 ),
