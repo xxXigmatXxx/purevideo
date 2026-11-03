@@ -49,14 +49,14 @@ class EkinoAuthRepository implements AuthRepository {
             'account',
           );
           _account = null;
-          _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
+          _account = null; _dio = EkinoDioFactory.getDio(null);
         }
       } else {
-        _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
+        _account = null; _dio = EkinoDioFactory.getDio(null);
       }
     } catch (e) {
       debugPrint('Błąd podczas ładowania konta Ekino: $e');
-      _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
+      _account = null; _dio = EkinoDioFactory.getDio(null);
     }
   }
 
@@ -220,7 +220,7 @@ class EkinoAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     _account = null;
-    _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
+    _account = null; _dio = EkinoDioFactory.getDio(null);
     _authController.add(
       AuthModel(
         service: SupportedService.ekino,
