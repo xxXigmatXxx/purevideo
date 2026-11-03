@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:purevideo/core/services/webview_service.dart';
 import 'package:flutter/material.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/link_model.dart';
@@ -29,6 +30,7 @@ class FilmanMovieRepository implements MovieRepository {
   }
 
   Future<void> _prepareDio() async {
+    await WebViewService.ensureCleanUserAgent();
     if (_dio == null) {
       final account = _authRepository.getAccount();
       _dio = FilmanDioFactory.getDio(account);
