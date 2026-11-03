@@ -38,9 +38,23 @@ jobs:
         run: flutter pub get
 
       - name: Analyze (errors only)
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error •" || echo "no analyzer errors"
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | grep -E "error â€˘" || echo "no analyzer errors"
+
+      - name: Prepare serious_python site-packages
+        run: |
+          SP=/tmp/serious_python_site_packages
+          rm -rf $SP /tmp/wheels
+          mkdir -p /tmp/wheels
+          pip download --no-deps --only-binary=:all: -d /tmp/wheels six urllib3 idna certifi chardet requests
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            mkdir -p $SP/$abi/opt
+            for w in /tmp/wheels/*.whl; do unzip -q -o $w -d $SP/$abi; done
+          done
+          ls $SP
 
       - name: Build APK
+        env:
+          SERIOUS_PYTHON_SITE_PACKAGES: /tmp/serious_python_site_packages
         run: |
           set +e
           flutter build apk --release 2>&1 | tee build_log.txt
