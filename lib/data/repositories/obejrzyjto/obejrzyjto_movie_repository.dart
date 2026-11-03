@@ -81,9 +81,8 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
 
     final seasonCount = data.length;
 
-    final List<SeasonModel> seasons = [];
-
-    for (var i = 1; i <= seasonCount; i++) {
+    final seasonFutures = List.generate(seasonCount, (idx) async {
+      final i = idx + 1;
       final seasonResponse =
           await _dio!.get('/api/v1/titles/$movieId/seasons/$i/episodes',
               queryParameters: {
@@ -117,8 +116,10 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
         ));
       }
 
-      seasons.add(SeasonModel(number: i, episodes: episodes));
-    }
+      return SeasonModel(number: i, episodes: episodes);
+    });
+
+    final seasons = await Future.wait(seasonFutures);
 
     return movie.copyWith(
       seasons: seasons,
