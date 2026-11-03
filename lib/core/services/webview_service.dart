@@ -214,7 +214,7 @@ class WebViewService {
     await ensureCleanUserAgent();
     final completer = Completer<List<io.Cookie>?>();
     BuildContext? dialogCtx;
-    final timer = Timer(const Duration(seconds: 8), () {
+    final timer = Timer(const Duration(seconds: 45), () {
       if (!completer.isCompleted) {
         completer.complete(null);
         if (dialogCtx != null && dialogCtx!.mounted) {
