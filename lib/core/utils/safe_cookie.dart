@@ -20,6 +20,8 @@ class RawCookie implements Cookie {
   bool secure = false;
   @override
   bool httpOnly = false;
+  @override
+  SameSite? sameSite;
 
   RawCookie(this.name, this.value);
 
