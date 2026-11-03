@@ -1,3 +1,4 @@
+import 'package:purevideo/core/utils/safe_cookie.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
@@ -265,7 +266,7 @@ class WebViewService {
                   if (cfClearance != null && !completer.isCompleted) {
                     timer.cancel();
                     completer.complete(cookies
-                        .map((c) => io.Cookie(c.name, c.value))
+                        .map((c) => RawCookie(c.name, c.value))
                         .toList());
                     if (context.mounted) Navigator.of(context).pop();
                   }
