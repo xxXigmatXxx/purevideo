@@ -1,3 +1,4 @@
+import 'package:purevideo/core/utils/safe_cookie.dart';
 import 'dart:io';
 
 import 'package:collection/collection.dart';
@@ -44,7 +45,7 @@ class FilmanDioFactory {
             final List<Cookie> initialCookies =
                 (response.requestOptions.headers['Cookie'] as String?)
                         ?.split(';')
-                        .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+                        .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
                         .where((cookie) => cookie.name != 'cf_clearance')
                         .toList() ??
                     [];
