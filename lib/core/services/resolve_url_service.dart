@@ -3,8 +3,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:purevideo/core/services/webview_service.dart';
-import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/data/models/link_model.dart';
 import 'package:purevideo/data/repositories/video_source_repository.dart';
 
@@ -62,11 +60,11 @@ class ResolveUrlService {
 
   Future<String> _unwrapUrl(String url) async {
     var u = _cleanEmbedUrl(url);
-    if (u.contains('ekino.link')) {
+    if (u.contains('streamlyplayero.') || u.contains('streamlyplayer.')) {
       try {
         final r = await _extDio.get<String>(
           u,
-          options: Options(headers: {'Referer': 'https://ekino.ws/'}),
+          options: Options(headers: {'Referer': 'https://obejrzyj.to/'}),
         );
         final body = r.data ?? '';
         final m = RegExp(
@@ -79,16 +77,6 @@ class ResolveUrlService {
           if (ifr.startsWith('http')) return ifr;
         }
       } catch (_) {}
-      // Plain HTTP did not expose the iframe (it is injected by JS), so load
-      // the page in a WebView and wait for it, like the original app did.
-      if (u.contains('ekino.link')) {
-        try {
-          final el = await getIt<WebViewService>().waitForDomElement(u, 'iframe');
-          var ifr = (el?.attributes['src'] ?? '').trim();
-          if (ifr.startsWith('//')) ifr = 'https:$ifr';
-          if (ifr.startsWith('http')) return ifr;
-        } catch (_) {}
-      }
     }
     return u;
   }
@@ -297,16 +285,17 @@ class ResolveUrlService {
 
   Future<List<VideoSource>> resolve(List<HostLink> urls) async {
     debugPrint('Resolving URLs: $urls');
-    final unwrappedList = <HostLink>[];
-    for (final u in urls) {
-      if (u.url.trim().isEmpty || u.url.contains('upzone.cc')) continue;
+    final unwrappedResults = await Future.wait(urls.map((u) async {
+      if (u.url.trim().isEmpty || u.url.contains('upzone.cc')) return null;
       final unwrapped = await _unwrapUrl(u.url);
       if (unwrapped.isNotEmpty &&
           !unwrapped.contains('upzone.cc') &&
           !unwrapped.contains('ekino.link')) {
-        unwrappedList.add(u.copyWith(url: unwrapped));
+        return u.copyWith(url: unwrapped);
       }
-    }
+      return null;
+    }));
+    final unwrappedList = unwrappedResults.whereType<HostLink>().toList();
     if (unwrappedList.isEmpty) return [];
 
     final fallbackSources = unwrappedList.map(_buildFallbackSource).toList();
