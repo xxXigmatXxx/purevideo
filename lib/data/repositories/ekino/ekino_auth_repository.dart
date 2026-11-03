@@ -1,3 +1,4 @@
+import 'package:purevideo/core/utils/safe_cookie.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -107,7 +108,7 @@ class EkinoAuthRepository implements AuthRepository {
         );
         if (true) {
           final cookies = response.headers['set-cookie']
-                  ?.map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+                  ?.map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
                   .toList() ??
               [];
 
@@ -145,7 +146,7 @@ class EkinoAuthRepository implements AuthRepository {
           final cookieList = (json['cookies'] as String).split(';');
 
           final cookies = cookieList
-              .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+              .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
               .toList();
 
           _account = AccountModel(
