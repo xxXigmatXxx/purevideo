@@ -43,6 +43,49 @@ jobs:
                   if d in ('__pycache__', '.git', '.dart_tool'):
                       shutil.rmtree(os.path.join(root, d), ignore_errors=True)
 
+          print('=== 2a. Updating LibResolveURL from upstream Gujal00/ResolveURL ===')
+          rurl_zip = '/tmp/resolveurl_master.zip'
+          rurl_extract = '/tmp/resolveurl_latest'
+          shutil.rmtree(rurl_extract, ignore_errors=True)
+          urllib.request.urlretrieve('https://github.com/Gujal00/ResolveURL/archive/refs/heads/master.zip', rurl_zip)
+          with zipfile.ZipFile(rurl_zip, 'r') as z:
+              z.extractall(rurl_extract)
+          src_rurl = os.path.join(rurl_extract, 'ResolveURL-master', 'script.module.resolveurl')
+          dst_rurl = os.path.join(work, 'LibResolveURL', 'script.module.resolveurl')
+          if os.path.exists(src_rurl):
+              shutil.rmtree(dst_rurl, ignore_errors=True)
+              shutil.copytree(src_rurl, dst_rurl)
+              print('Successfully updated script.module.resolveurl from upstream!')
+
+          # Fix xbmcaddon.py circular import cache bug (_xml_defaults stuck at 3 items)
+          p_xbmcaddon = os.path.join(work, 'LibResolveURL', 'libresolveurl', '_kodi_stubs', 'xbmcaddon.py')
+          if os.path.exists(p_xbmcaddon):
+              s_xa = open(p_xbmcaddon, encoding='utf-8').read()
+              s_xa = s_xa.replace('if _xml_defaults is None:', 'if _xml_defaults is None or len(_xml_defaults) < 100:')
+              s_xa = s_xa.replace('return ""', 'if key.endswith("_enabled") or key in ("allow_popups", "allow_universal"): return "true"\n            if key.endswith("_priority"): return "100"\n            return ""')
+              open(p_xbmcaddon, 'w', encoding='utf-8').write(s_xa)
+
+          # Patch hmf.py to skip redundant __test_stream HTTP check (faster + preserves single-use stream tokens)
+          p_hmf = os.path.join(dst_rurl, 'lib', 'resolveurl', 'hmf.py')
+          if os.path.exists(p_hmf):
+              s_hmf = open(p_hmf, encoding='utf-8').read()
+              s_hmf = s_hmf.replace('status, mimetype = self.__test_stream(stream_url)', 'status, mimetype = True, ""')
+              open(p_hmf, 'w', encoding='utf-8').write(s_hmf)
+
+          # Patch net.py default timeout from 30s to 8s so dead hosts fail fast
+          p_net = os.path.join(dst_rurl, 'lib', 'resolveurl', 'lib', 'net.py')
+          if os.path.exists(p_net):
+              s_net = open(p_net, encoding='utf-8').read()
+              s_net = s_net.replace('timeout=30', 'timeout=8')
+              open(p_net, 'w', encoding='utf-8').write(s_net)
+
+          # Patch byse.py PoW timeout from 45s to 8s
+          p_byse = os.path.join(dst_rurl, 'lib', 'resolveurl', 'plugins', 'byse.py')
+          if os.path.exists(p_byse):
+              s_byse = open(p_byse, encoding='utf-8').read()
+              s_byse = s_byse.replace('def er(self, t, e, r=45.0):', 'def er(self, t, e, r=8.0):').replace('timeout=40', 'timeout=10')
+              open(p_byse, 'w', encoding='utf-8').write(s_byse)
+
           if os.path.exists('python_data/resources/settings.xml'):
               os.makedirs(os.path.join(work, 'python_data', 'resources'), exist_ok=True)
               shutil.copyfile('python_data/resources/settings.xml', os.path.join(work, 'python_data', 'resources', 'settings.xml'))
@@ -63,196 +106,12 @@ jobs:
                               z.extractall(os.path.join(sp_root, abi))
                       break
 
-          main_py = '''#!/usr/bin/env python3
-          import os, re, sys, ssl, json, base64, traceback, urllib.request
-          from urllib.parse import unquote
-          from http.server import HTTPServer, BaseHTTPRequestHandler
-          from socketserver import ThreadingMixIn
-          from concurrent.futures import ThreadPoolExecutor
-
-          base_dir = os.path.dirname(os.path.realpath(__file__))
-          data_dir = os.path.join(base_dir, "python_data")
-          os.makedirs(os.path.join(data_dir, "resources"), exist_ok=True)
-          os.environ["LIBRESOLVEURL_CONFIG_DIR"] = data_dir
-          os.environ["LIBRESOLVEURL_ADDON_PATH"] = data_dir
-
-          for p in (base_dir, data_dir, os.path.join(base_dir, "LibResolveURL")):
-              if p not in sys.path:
-                  sys.path.insert(0, p)
-
-          try:
-              ssl._create_default_https_context = ssl._create_unverified_context
-          except Exception:
-              pass
-
-          LIBRESOLVEURL_AVAILABLE = False
-          libresolveurl = None
-          try:
-              import libresolveurl
-              try:
-                  import resolveurl.common as common
-                  common.settings_file = os.path.join(data_dir, "resources", "settings.xml")
-                  from resolveurl.lib import net
-                  orig_init = net.Net.__init__
-                  def patched_net_init(self, *args, **kwargs):
-                      kwargs["ssl_verify"] = False
-                      orig_init(self, *args, **kwargs)
-                  net.Net.__init__ = patched_net_init
-              except Exception as e:
-                  print(f"DEBUG: Net patch warning: {e}")
-              LIBRESOLVEURL_AVAILABLE = True
-          except Exception as e:
-              print(f"DEBUG: libresolveurl import error: {e}")
-
-          UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-
-          def host_name(url: str) -> str:
-              m = re.search(r"://(?:www\.)?([^/]+)", url)
-              return m.group(1).split(".")[0].upper() if m else "WIDEO"
-
-          def clean_and_unwrap_url(url: str) -> str:
-              url = (url or "").strip()
-              if url.startswith("{"):
-                  try:
-                      obj = json.loads(url)
-                      url = str(obj.get("src") or obj.get("url") or url).strip()
-                  except Exception:
-                      pass
-              if url.startswith("//"):
-                  url = "https:" + url
-              if "tmp-url.pro" in url:
-                  try:
-                      req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
-                      with urllib.request.urlopen(req, timeout=6) as resp:
-                          body = resp.read().decode("utf-8", errors="ignore")
-                      me = re.search(r"var\s+_e\s*=\s*['\"]([A-Za-z0-9+/=]+)['\"]", body)
-                      ma = re.search(r"var\s+_a\s*=\s*['\"]([^'\"]+)['\"]", body)
-                      mb = re.search(r"var\s+_b\s*=\s*['\"]([^'\"]+)['\"]", body)
-                      mc = re.search(r"var\s+_c\s*=\s*['\"]([^'\"]+)['\"]", body)
-                      if me and ma and mb and mc:
-                          raw = base64.b64decode(me.group(1))
-                          key = (ma.group(1) + mb.group(1) + mc.group(1)).encode("utf-8")
-                          dec = "".join(chr(raw[i] ^ key[i % len(key)]) for i in range(len(raw)))
-                          if dec.startswith("http"):
-                              return dec
-                  except Exception:
-                      pass
-              return url
-
-          def fallback_regex_resolve(url: str):
-              try:
-                  req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
-                  with urllib.request.urlopen(req, timeout=6) as resp:
-                      html = resp.read().decode("utf-8", errors="ignore")
-                  redir = re.search(r"window\.location\.href\s*=\s*['\"](https?://[^'\"]+)['\"]", html)
-                  if redir:
-                      url = redir.group(1)
-                      req2 = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://filman.cc/"})
-                      with urllib.request.urlopen(req2, timeout=6) as resp2:
-                          html = resp2.read().decode("utf-8", errors="ignore")
-                  m_mp4 = re.search(r"sourcesCode\s*:\s*\[\s*\{\s*src:\s*['\"](https?://[^'\"]+)['\"]", html) or re.search(r"<source[^>]+src=['\"](https?://[^'\"]+\.mp4[^'\"]*)['\"]", html)
-                  if m_mp4:
-                      return m_mp4.group(1) + f"|User-Agent={UA}&Referer={url}"
-                  m_rob = re.search(r"id=['\"]robotlink['\"][^>]*>([^<]+)", html)
-                  m_tok = re.search(r"getElementById\(['\"]robotlink['\"]\)\.innerHTML\s*\+\s*['\"]([^'\"]+)['\"]", html)
-                  if m_rob and m_tok:
-                      return "https:" + m_rob.group(1).strip() + m_tok.group(1).strip() + f"|User-Agent={UA}&Referer={url}"
-                  m_hls = re.search(r"['\"]hls['\"]\s*:\s*['\"](https?://[^'\"]+\.m3u8[^'\"]*)['\"]", html) or re.search(r"(https?://[^\s\"'<>\\]+\.m3u8[^\s\"'<>\\]*)", html)
-                  if m_hls:
-                      return m_hls.group(1).replace("\\/", "/") + f"|User-Agent={UA}&Referer={url}"
-                  for b64 in re.findall(r"['\"](aHR0c[A-Za-z0-9+/=]{16,})['\"]", html):
-                      try:
-                          d = base64.b64decode(b64).decode("utf-8", errors="ignore")
-                          if d.startswith("http"):
-                              return d + f"|User-Agent={UA}&Referer={url}"
-                      except Exception:
-                          pass
-              except Exception:
-                  pass
-              return None
-
-          def resolve_single_item(item):
-              try:
-                  if isinstance(item, str):
-                      raw_url, language, quality, extra_headers = item, "PL", "HD", {}
-                  elif isinstance(item, dict):
-                      raw_url = item.get("url") or ""
-                      language = item.get("language") or item.get("lang") or "PL"
-                      quality = item.get("quality") or "HD"
-                      extra_headers = item.get("headers") or {}
-                  else:
-                      return None, None
-                  url = clean_and_unwrap_url(raw_url)
-                  if not url:
-                      return None, None
-                  headers = {"User-Agent": UA, "Referer": url}
-                  if isinstance(extra_headers, dict):
-                      headers.update(extra_headers)
-                  resolved = None
-                  if LIBRESOLVEURL_AVAILABLE and libresolveurl:
-                      try:
-                          resolved = libresolveurl.resolve(url)
-                      except Exception:
-                          resolved = None
-                  if not resolved:
-                      resolved = fallback_regex_resolve(url)
-                  if resolved:
-                      if "|" in resolved:
-                          resolved_url, header_str = resolved.split("|", 1)
-                          for pair in header_str.split("&"):
-                              if "=" in pair:
-                                  k, v = pair.split("=", 1)
-                                  headers[k.strip()] = unquote(v.strip())
-                          resolved = resolved_url.strip()
-                      return ({"host": host_name(url), "url": resolved, "headers": headers, "language": language, "quality": quality}, None)
-                  else:
-                      return (None, {"host": host_name(url) + " (Web)", "url": url, "headers": {"User-Agent": UA, "Referer": "https://filman.cc/"}, "language": language, "quality": quality})
-              except Exception:
-                  return None, None
-
-          class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-              daemon_threads = True
-              allow_reuse_address = True
-
-          class ResolverHandler(BaseHTTPRequestHandler):
-              def _send_json(self, status: int, payload):
-                  body = json.dumps(payload).encode("utf-8")
-                  self.send_response(status)
-                  self.send_header("Content-Type", "application/json; charset=utf-8")
-                  self.send_header("Content-Length", str(len(body)))
-                  self.end_headers()
-                  self.wfile.write(body)
-              def do_GET(self):
-                  self._send_json(200, {"status": "ok", "libresolveurl": LIBRESOLVEURL_AVAILABLE})
-              def do_POST(self):
-                  if not self.path.startswith("/resolve"):
-                      self._send_json(404, {"error": "Not found"})
-                      return
-                  try:
-                      length = int(self.headers.get("Content-Length", "0"))
-                      raw_body = self.rfile.read(length).decode("utf-8", errors="ignore")
-                      data = json.loads(raw_body) if raw_body else []
-                      links = data if isinstance(data, list) else data.get("links", [])
-                      results, fallbacks = [], []
-                      with ThreadPoolExecutor(max_workers=8) as ex:
-                          for res, fb in ex.map(resolve_single_item, links):
-                              if res:
-                                  results.append(res)
-                              elif fb:
-                                  fallbacks.append(fb)
-                      results.extend(fallbacks)
-                      self._send_json(200, results)
-                  except Exception as e:
-                      self._send_json(500, {"error": str(e)})
-
-          if __name__ == "__main__":
-              port = int(os.environ.get("RESOLVER_PORT", "8080"))
-              print(f"ResolveURL server starting on http://0.0.0.0:{port}")
-              sys.stdout.flush()
-              ThreadingHTTPServer(("0.0.0.0", port), ResolverHandler).serve_forever()
-          '''
-          with open(os.path.join(work, 'main.py'), 'w', encoding='utf-8') as f:
-              f.write('\n'.join(line[10:] if line.startswith('          ') else line for line in main_py.splitlines()))
+          main_py_b64 = "IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwppbXBvcnQgb3MsIHJlLCBzeXMsIHNzbCwganNvbiwgYmFzZTY0LCB0cmFjZWJhY2ssIHVybGxpYi5yZXF1ZXN0LCB1cmxsaWIucGFyc2UKZnJvbSB1cmxsaWIucGFyc2UgaW1wb3J0IHVucXVvdGVfcGx1cwpmcm9tIGh0dHAuc2VydmVyIGltcG9ydCBIVFRQU2VydmVyLCBCYXNlSFRUUFJlcXVlc3RIYW5kbGVyCmZyb20gc29ja2V0c2VydmVyIGltcG9ydCBUaHJlYWRpbmdNaXhJbgpmcm9tIGNvbmN1cnJlbnQuZnV0dXJlcyBpbXBvcnQgVGhyZWFkUG9vbEV4ZWN1dG9yLCB3YWl0CgpiYXNlX2RpciA9IG9zLnBhdGguZGlybmFtZShvcy5wYXRoLnJlYWxwYXRoKF9fZmlsZV9fKSkKZGF0YV9kaXIgPSBvcy5wYXRoLmpvaW4oYmFzZV9kaXIsICJweXRob25fZGF0YSIpCm9zLm1ha2VkaXJzKG9zLnBhdGguam9pbihkYXRhX2RpciwgInJlc291cmNlcyIpLCBleGlzdF9vaz1UcnVlKQpvcy5lbnZpcm9uWyJMSUJSRVNPTFZFVVJMX0NPTkZJR19ESVIiXSA9IGRhdGFfZGlyCm9zLmVudmlyb25bIkxJQlJFU09MVkVVUkxfQURET05fUEFUSCJdID0gZGF0YV9kaXIKCmZvciBwIGluIChiYXNlX2RpciwgZGF0YV9kaXIsIG9zLnBhdGguam9pbihiYXNlX2RpciwgIkxpYlJlc29sdmVVUkwiKSk6CiAgICBpZiBwIG5vdCBpbiBzeXMucGF0aDoKICAgICAgICBzeXMucGF0aC5pbnNlcnQoMCwgcCkKCnRyeToKICAgIHNzbC5fY3JlYXRlX2RlZmF1bHRfaHR0cHNfY29udGV4dCA9IHNzbC5fY3JlYXRlX3VudmVyaWZpZWRfY29udGV4dApleGNlcHQgRXhjZXB0aW9uOgogICAgcGFzcwoKVUEgPSAiTW96aWxsYS81LjAgKExpbnV4OyBBbmRyb2lkIDEwOyBLKSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTMxLjAuMC4wIE1vYmlsZSBTYWZhcmkvNTM3LjM2IgoKTElCUkVTT0xWRVVSTF9BVkFJTEFCTEUgPSBGYWxzZQpsaWJyZXNvbHZldXJsID0gTm9uZQp0cnk6CiAgICBpbXBvcnQgbGlicmVzb2x2ZXVybAogICAgdHJ5OgogICAgICAgIGltcG9ydCB4Ym1jYWRkb24KICAgICAgICB4Ym1jYWRkb24uX3htbF9kZWZhdWx0cyA9IE5vbmUKICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgcGFzcwogICAgdHJ5OgogICAgICAgIGltcG9ydCByZXNvbHZldXJsLmNvbW1vbiBhcyBjb21tb24KICAgICAgICBjb21tb24uc2V0dGluZ3NfZmlsZSA9IG9zLnBhdGguam9pbihkYXRhX2RpciwgInJlc291cmNlcyIsICJzZXR0aW5ncy54bWwiKQogICAgICAgIGNvbW1vbi5SQU5EX1VBID0gVUEKICAgICAgICBjb21tb24uRkZfVVNFUl9BR0VOVCA9IFVBCiAgICAgICAgY29tbW9uLkNIUk9NRV9VU0VSX0FHRU5UID0gVUEKICAgICAgICBmcm9tIHJlc29sdmV1cmwubGliIGltcG9ydCBuZXQKICAgICAgICBvcmlnX2luaXQgPSBuZXQuTmV0Ll9faW5pdF9fCiAgICAgICAgZGVmIHBhdGNoZWRfbmV0X2luaXQoc2VsZiwgKmFyZ3MsICoqa3dhcmdzKToKICAgICAgICAgICAga3dhcmdzWyJzc2xfdmVyaWZ5Il0gPSBGYWxzZQogICAgICAgICAgICBvcmlnX2luaXQoc2VsZiwgKmFyZ3MsICoqa3dhcmdzKQogICAgICAgIG5ldC5OZXQuX19pbml0X18gPSBwYXRjaGVkX25ldF9pbml0CiAgICAgICAgZnJvbSByZXNvbHZldXJsLmhtZiBpbXBvcnQgSG9zdGVkTWVkaWFGaWxlCiAgICAgICAgSG9zdGVkTWVkaWFGaWxlLl9Ib3N0ZWRNZWRpYUZpbGVfX3Rlc3Rfc3RyZWFtID0gbGFtYmRhIHNlbGYsIHM6IChUcnVlLCAiIikKICAgIGV4Y2VwdCBFeGNlcHRpb24gYXMgZToKICAgICAgICBwcmludChmIkRFQlVHOiBOZXQvY29tbW9uIHBhdGNoIHdhcm5pbmc6IHtlfSIpCiAgICBMSUJSRVNPTFZFVVJMX0FWQUlMQUJMRSA9IFRydWUKZXhjZXB0IEV4Y2VwdGlvbiBhcyBlOgogICAgcHJpbnQoZiJERUJVRzogbGlicmVzb2x2ZXVybCBpbXBvcnQgZXJyb3I6IHtlfSIpCgpkZWYgaG9zdF9uYW1lKHVybDogc3RyKSAtPiBzdHI6CiAgICBtID0gcmUuc2VhcmNoKHIiOi8vKD86d3d3XC4pPyhbXi9dKykiLCB1cmwpCiAgICByZXR1cm4gbS5ncm91cCgxKS5zcGxpdCgiLiIpWzBdLnVwcGVyKCkgaWYgbSBlbHNlICJXSURFTyIKCmRlZiBjbGVhbl9hbmRfdW53cmFwX3VybCh1cmw6IHN0cikgLT4gc3RyOgogICAgdXJsID0gKHVybCBvciAiIikuc3RyaXAoKQogICAgaWYgdXJsLnN0YXJ0c3dpdGgoInsiKToKICAgICAgICB0cnk6CiAgICAgICAgICAgIG9iaiA9IGpzb24ubG9hZHModXJsKQogICAgICAgICAgICB1cmwgPSBzdHIob2JqLmdldCgic3JjIikgb3Igb2JqLmdldCgidXJsIikgb3IgdXJsKS5zdHJpcCgpCiAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgcGFzcwogICAgaWYgdXJsLnN0YXJ0c3dpdGgoIi8vIik6CiAgICAgICAgdXJsID0gImh0dHBzOiIgKyB1cmwKICAgIGlzX3N1cHAgPSBGYWxzZQogICAgaWYgTElCUkVTT0xWRVVSTF9BVkFJTEFCTEUgYW5kIGxpYnJlc29sdmV1cmw6CiAgICAgICAgdHJ5OgogICAgICAgICAgICBpc19zdXBwID0gbGlicmVzb2x2ZXVybC5pc19zdXBwb3J0ZWQodXJsKQogICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgIGlzX3N1cHAgPSBGYWxzZQogICAgaWYgInRtcC11cmwiIGluIHVybCBvciBub3QgaXNfc3VwcDoKICAgICAgICB0cnk6CiAgICAgICAgICAgIHJlcSA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QodXJsLCBoZWFkZXJzPXsiVXNlci1BZ2VudCI6IFVBLCAiUmVmZXJlciI6ICJodHRwczovL2ZpbG1hbi5jYy8ifSkKICAgICAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD01KSBhcyByZXNwOgogICAgICAgICAgICAgICAgZmluYWxfdSA9IHJlc3AuZ2V0dXJsKCkKICAgICAgICAgICAgICAgIGJvZHkgPSByZXNwLnJlYWQoKS5kZWNvZGUoInV0Zi04IiwgZXJyb3JzPSJpZ25vcmUiKQogICAgICAgICAgICBtZSA9IHJlLnNlYXJjaChyJ3ZhclxzK19lXHMqPVxzKltcJyJdKFtBLVphLXowLTkrLz1dKylbXCciXScsIGJvZHkpCiAgICAgICAgICAgIG1hID0gcmUuc2VhcmNoKHIndmFyXHMrX2Fccyo9XHMqW1wnIl0oW15cJyJdKylbXCciXScsIGJvZHkpCiAgICAgICAgICAgIG1iID0gcmUuc2VhcmNoKHIndmFyXHMrX2Jccyo9XHMqW1wnIl0oW15cJyJdKylbXCciXScsIGJvZHkpCiAgICAgICAgICAgIG1jID0gcmUuc2VhcmNoKHIndmFyXHMrX2Nccyo9XHMqW1wnIl0oW15cJyJdKylbXCciXScsIGJvZHkpCiAgICAgICAgICAgIGlmIG1lIGFuZCBtYSBhbmQgbWIgYW5kIG1jOgogICAgICAgICAgICAgICAgcmF3ID0gYmFzZTY0LmI2NGRlY29kZShtZS5ncm91cCgxKSkKICAgICAgICAgICAgICAgIGtleSA9IChtYS5ncm91cCgxKSArIG1iLmdyb3VwKDEpICsgbWMuZ3JvdXAoMSkpLmVuY29kZSgidXRmLTgiKQogICAgICAgICAgICAgICAgZGVjID0gYnl0ZXMoW3Jhd1tpXSBeIGtleVtpICUgbGVuKGtleSldIGZvciBpIGluIHJhbmdlKGxlbihyYXcpKV0pLmRlY29kZSgidXRmLTgiLCBlcnJvcnM9Imlnbm9yZSIpLnN0cmlwKCkKICAgICAgICAgICAgICAgIGlmIGRlYy5zdGFydHN3aXRoKCJodHRwIik6CiAgICAgICAgICAgICAgICAgICAgcmV0dXJuIGRlYwogICAgICAgICAgICBpZiBmaW5hbF91IGFuZCBmaW5hbF91ICE9IHVybCBhbmQgZmluYWxfdS5zdGFydHN3aXRoKCJodHRwIik6CiAgICAgICAgICAgICAgICByZXR1cm4gZmluYWxfdQogICAgICAgICAgICBtX2lmciA9IHJlLnNlYXJjaChyJzxpZnJhbWVbXj5dK3NyYz1bXCciXShodHRwcz86Ly9bXlwnIl0rKVtcJyJdJywgYm9keSwgcmUuSSkKICAgICAgICAgICAgaWYgbV9pZnI6CiAgICAgICAgICAgICAgICByZXR1cm4gbV9pZnIuZ3JvdXAoMSkuc3RyaXAoKQogICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgIHBhc3MKICAgIHJldHVybiB1cmwKCmRlZiBmYWxsYmFja19yZWdleF9yZXNvbHZlKHVybDogc3RyKToKICAgIHRyeToKICAgICAgICByZXEgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KHVybCwgaGVhZGVycz17IlVzZXItQWdlbnQiOiBVQSwgIlJlZmVyZXIiOiAiaHR0cHM6Ly9maWxtYW4uY2MvIn0pCiAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcSwgdGltZW91dD02KSBhcyByZXNwOgogICAgICAgICAgICBodG1sID0gcmVzcC5yZWFkKCkuZGVjb2RlKCJ1dGYtOCIsIGVycm9ycz0iaWdub3JlIikKICAgICAgICByZWRpciA9IHJlLnNlYXJjaChyJ3dpbmRvd1wubG9jYXRpb25cLmhyZWZccyo9XHMqW1wnIl0oaHR0cHM/Oi8vW15cJyJdKylbXCciXScsIGh0bWwpCiAgICAgICAgaWYgcmVkaXI6CiAgICAgICAgICAgIHVybCA9IHJlZGlyLmdyb3VwKDEpCiAgICAgICAgICAgIGlmIExJQlJFU09MVkVVUkxfQVZBSUxBQkxFIGFuZCBsaWJyZXNvbHZldXJsOgogICAgICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgICAgIHJfcmVkID0gbGlicmVzb2x2ZXVybC5yZXNvbHZlKHVybCkKICAgICAgICAgICAgICAgICAgICBpZiByX3JlZDoKICAgICAgICAgICAgICAgICAgICAgICAgcmV0dXJuIHJfcmVkCiAgICAgICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgICAgIHBhc3MKICAgICAgICAgICAgcmVxMiA9IHVybGxpYi5yZXF1ZXN0LlJlcXVlc3QodXJsLCBoZWFkZXJzPXsiVXNlci1BZ2VudCI6IFVBLCAiUmVmZXJlciI6ICJodHRwczovL2ZpbG1hbi5jYy8ifSkKICAgICAgICAgICAgd2l0aCB1cmxsaWIucmVxdWVzdC51cmxvcGVuKHJlcTIsIHRpbWVvdXQ9NikgYXMgcmVzcDI6CiAgICAgICAgICAgICAgICBodG1sID0gcmVzcDIucmVhZCgpLmRlY29kZSgidXRmLTgiLCBlcnJvcnM9Imlnbm9yZSIpCiAgICAgICAgaWYgIkJ5c2UgRnJvbnRlbmQiIGluIGh0bWwgb3IgInZpZGVvLWVtYmVkLW1vZGUiIGluIGh0bWw6CiAgICAgICAgICAgIHRyeToKICAgICAgICAgICAgICAgIGZyb20gcmVzb2x2ZXVybC5wbHVnaW5zLmJ5c2UgaW1wb3J0IEJ5c2VSZXNvbHZlcgogICAgICAgICAgICAgICAgbV9ieXNlID0gcmUuc2VhcmNoKHIiOi8vKFteL10rKS8oPzplfGQpLyhbMC05YS16QS1aXSspIiwgdXJsKQogICAgICAgICAgICAgICAgaWYgbV9ieXNlOgogICAgICAgICAgICAgICAgICAgIHJldHVybiBCeXNlUmVzb2x2ZXIoKS5nZXRfbWVkaWFfdXJsKG1fYnlzZS5ncm91cCgxKSwgbV9ieXNlLmdyb3VwKDIpKQogICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgcGFzcwogICAgICAgIHJfdm9lID0gcmUuc2VhcmNoKHInanNvbiI+XFsiKFteIl0rKSJdPC9zY3JpcHQ+XHMqPHNjcmlwdFxzKnNyYz0iKFteIl0rKScsIGh0bWwpCiAgICAgICAgaWYgcl92b2U6CiAgICAgICAgICAgIHRyeToKICAgICAgICAgICAgICAgIGZyb20gcmVzb2x2ZXVybC5wbHVnaW5zLnZvZXN4IGltcG9ydCBWb2VSZXNvbHZlcgogICAgICAgICAgICAgICAgdTIgPSB1cmxsaWIucGFyc2UudXJsam9pbih1cmwsIHJfdm9lLmdyb3VwKDIpKQogICAgICAgICAgICAgICAgcmVxX3YgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KHUyLCBoZWFkZXJzPXsiVXNlci1BZ2VudCI6IFVBLCAiUmVmZXJlciI6IHVybH0pCiAgICAgICAgICAgICAgICB3aXRoIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxX3YsIHRpbWVvdXQ9NSkgYXMgcnY6CiAgICAgICAgICAgICAgICAgICAgaHRtbDIgPSBydi5yZWFkKCkuZGVjb2RlKCJ1dGYtOCIsIGVycm9ycz0iaWdub3JlIikKICAgICAgICAgICAgICAgIHJlcGwgPSByZS5zZWFyY2gociIoXFsoPzonXFd7Mn0nWyxcXV0pezEsOX0pIiwgaHRtbDIpCiAgICAgICAgICAgICAgICBpZiByZXBsOgogICAgICAgICAgICAgICAgICAgIHMgPSBWb2VSZXNvbHZlci52b2VfZGVjb2RlKHJfdm9lLmdyb3VwKDEpLCByZXBsLmdyb3VwKDEpKQogICAgICAgICAgICAgICAgICAgIGZvciBrIGluICgic291cmNlIiwgImZpbGUiLCAiZGlyZWN0X2FjY2Vzc191cmwiKToKICAgICAgICAgICAgICAgICAgICAgICAgaWYgcy5nZXQoayk6CiAgICAgICAgICAgICAgICAgICAgICAgICAgICByZXR1cm4gc3RyKHMuZ2V0KGspKSArIGYifFVzZXItQWdlbnQ9e1VBfSZSZWZlcmVyPXt1cmx9IgogICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgcGFzcwogICAgICAgIHRyeToKICAgICAgICAgICAgZnJvbSByZXNvbHZldXJsLmxpYiBpbXBvcnQganN1bnBhY2sKICAgICAgICAgICAgZm9yIHBhY2tlZCBpbiByZS5maW5kYWxsKHIiKGV2YWxcKGZ1bmN0aW9uXChwLGEsYyxrLGUsW2RyXVwpLio/XClcKSkiLCBodG1sLCByZS5TKToKICAgICAgICAgICAgICAgIHVucGFja2VkID0ganN1bnBhY2sudW5wYWNrKHBhY2tlZCkKICAgICAgICAgICAgICAgIG1fdSA9IHJlLnNlYXJjaChyJ1tcJyJdKGh0dHBzPzovL1teXCciXStcLig/Om0zdTh8bXA0KVteXCciXSopW1wnIl0nLCB1bnBhY2tlZCkKICAgICAgICAgICAgICAgIGlmIG1fdToKICAgICAgICAgICAgICAgICAgICByZXR1cm4gbV91Lmdyb3VwKDEpICsgZiJ8VXNlci1BZ2VudD17VUF9JlJlZmVyZXI9e3VybH0iCiAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgcGFzcwogICAgICAgIG1fbXA0ID0gcmUuc2VhcmNoKHInc291cmNlc0NvZGVccyo6XHMqXFtccypce1xzKnNyYzpccypbXCciXShodHRwcz86Ly9bXlwnIl0rKVtcJyJdJywgaHRtbCkgb3IgcmUuc2VhcmNoKHInPHNvdXJjZVtePl0rc3JjPVtcJyJdKGh0dHBzPzovL1teXCciXStcLm1wNFteXCciXSopW1wnIl0nLCBodG1sKQogICAgICAgIGlmIG1fbXA0OgogICAgICAgICAgICByZXR1cm4gbV9tcDQuZ3JvdXAoMSkgKyBmInxVc2VyLUFnZW50PXtVQX0mUmVmZXJlcj17dXJsfSIKICAgICAgICBtX3JvYiA9IHJlLnNlYXJjaChyJ2lkPVtcJyJdcm9ib3RsaW5rW1wnIl1bXj5dKj4oW148XSspJywgaHRtbCkKICAgICAgICBtX3RvayA9IHJlLnNlYXJjaChyJ2dldEVsZW1lbnRCeUlkXChbXCciXXJvYm90bGlua1tcJyJdXClcLmlubmVySFRNTFxzKlwrXHMqW1wnIl0oW15cJyJdKylbXCciXScsIGh0bWwpCiAgICAgICAgaWYgbV9yb2IgYW5kIG1fdG9rOgogICAgICAgICAgICByZXR1cm4gImh0dHBzOiIgKyBtX3JvYi5ncm91cCgxKS5zdHJpcCgpICsgbV90b2suZ3JvdXAoMSkuc3RyaXAoKSArIGYifFVzZXItQWdlbnQ9e1VBfSZSZWZlcmVyPXt1cmx9IgogICAgICAgIG1faGxzID0gcmUuc2VhcmNoKHInW1wnIl1obHNbXCciXVxzKjpccypbXCciXShodHRwcz86Ly9bXlwnIl0rXC5tM3U4W15cJyJdKilbXCciXScsIGh0bWwpIG9yIHJlLnNlYXJjaChyJyhodHRwcz86Ly9bXlxzXCciPD5cXF0rXC5tM3U4W15cc1wnIjw+XFxdKiknLCBodG1sKQogICAgICAgIGlmIG1faGxzOgogICAgICAgICAgICByZXR1cm4gbV9obHMuZ3JvdXAoMSkgKyBmInxVc2VyLUFnZW50PXtVQX0mUmVmZXJlcj17dXJsfSIKICAgICAgICBmb3IgYjY0IGluIHJlLmZpbmRhbGwocidbXCciXShhSFIwY1tBLVphLXowLTkrLz1dezE2LH0pW1wnIl0nLCBodG1sKToKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgZCA9IGJhc2U2NC5iNjRkZWNvZGUoYjY0KS5kZWNvZGUoInV0Zi04IiwgZXJyb3JzPSJpZ25vcmUiKQogICAgICAgICAgICAgICAgaWYgZC5zdGFydHN3aXRoKCJodHRwIikgYW5kICgiLm0zdTgiIGluIGQgb3IgIi5tcDQiIGluIGQpOgogICAgICAgICAgICAgICAgICAgIHJldHVybiBkICsgZiJ8VXNlci1BZ2VudD17VUF9JlJlZmVyZXI9e3VybH0iCiAgICAgICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgICAgICBwYXNzCiAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgIHBhc3MKICAgIHJldHVybiBOb25lCgpkZWYgcmVzb2x2ZV9zaW5nbGVfaXRlbShpdGVtKToKICAgIHRyeToKICAgICAgICBpZiBpc2luc3RhbmNlKGl0ZW0sIHN0cik6CiAgICAgICAgICAgIHJhd191cmwsIGxhbmd1YWdlLCBxdWFsaXR5LCBleHRyYV9oZWFkZXJzID0gaXRlbSwgIlBMIiwgIkhEIiwge30KICAgICAgICBlbGlmIGlzaW5zdGFuY2UoaXRlbSwgZGljdCk6CiAgICAgICAgICAgIHJhd191cmwgPSBpdGVtLmdldCgidXJsIikgb3IgIiIKICAgICAgICAgICAgbGFuZ3VhZ2UgPSBpdGVtLmdldCgibGFuZ3VhZ2UiKSBvciBpdGVtLmdldCgibGFuZyIpIG9yICJQTCIKICAgICAgICAgICAgcXVhbGl0eSA9IGl0ZW0uZ2V0KCJxdWFsaXR5Iikgb3IgIkhEIgogICAgICAgICAgICBleHRyYV9oZWFkZXJzID0gaXRlbS5nZXQoImhlYWRlcnMiKSBvciB7fQogICAgICAgIGVsc2U6CiAgICAgICAgICAgIHJldHVybiBOb25lLCBOb25lCiAgICAgICAgdXJsID0gY2xlYW5fYW5kX3Vud3JhcF91cmwocmF3X3VybCkKICAgICAgICBpZiBub3QgdXJsIG9yICJ1cHpvbmUuY2MiIGluIHVybCBvciAiZWtpbm8ubGluayIgaW4gdXJsIG9yICJla2luby53cy93YXRjaCIgaW4gdXJsOgogICAgICAgICAgICByZXR1cm4gTm9uZSwgTm9uZQogICAgICAgIGhlYWRlcnMgPSB7IlVzZXItQWdlbnQiOiBVQSwgIlJlZmVyZXIiOiB1cmx9CiAgICAgICAgaWYgaXNpbnN0YW5jZShleHRyYV9oZWFkZXJzLCBkaWN0KToKICAgICAgICAgICAgaGVhZGVycy51cGRhdGUoZXh0cmFfaGVhZGVycykKICAgICAgICByZXNvbHZlZCA9IE5vbmUKICAgICAgICBpZiBMSUJSRVNPTFZFVVJMX0FWQUlMQUJMRSBhbmQgbGlicmVzb2x2ZXVybDoKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgcmVzb2x2ZWQgPSBsaWJyZXNvbHZldXJsLnJlc29sdmUodXJsKQogICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgcmVzb2x2ZWQgPSBOb25lCiAgICAgICAgaWYgbm90IHJlc29sdmVkOgogICAgICAgICAgICByZXNvbHZlZCA9IGZhbGxiYWNrX3JlZ2V4X3Jlc29sdmUodXJsKQogICAgICAgIGlmIHJlc29sdmVkOgogICAgICAgICAgICBpZiAifCIgaW4gcmVzb2x2ZWQ6CiAgICAgICAgICAgICAgICByZXNvbHZlZF91cmwsIGhlYWRlcl9zdHIgPSByZXNvbHZlZC5zcGxpdCgifCIsIDEpCiAgICAgICAgICAgICAgICBmb3IgcGFpciBpbiBoZWFkZXJfc3RyLnNwbGl0KCImIik6CiAgICAgICAgICAgICAgICAgICAgaWYgIj0iIGluIHBhaXI6CiAgICAgICAgICAgICAgICAgICAgICAgIGssIHYgPSBwYWlyLnNwbGl0KCI9IiwgMSkKICAgICAgICAgICAgICAgICAgICAgICAgaGVhZGVyc1trLnN0cmlwKCldID0gdW5xdW90ZV9wbHVzKHYuc3RyaXAoKSkKICAgICAgICAgICAgICAgIHJlc29sdmVkID0gcmVzb2x2ZWRfdXJsLnN0cmlwKCkKICAgICAgICAgICAgaGVhZGVycy5wb3AoInZlcmlmeXBlZXIiLCBOb25lKQogICAgICAgICAgICByZXR1cm4gKHsiaG9zdCI6IGhvc3RfbmFtZSh1cmwpLCAidXJsIjogcmVzb2x2ZWQsICJoZWFkZXJzIjogaGVhZGVycywgImxhbmd1YWdlIjogbGFuZ3VhZ2UsICJxdWFsaXR5IjogcXVhbGl0eX0sIE5vbmUpCiAgICAgICAgZWxzZToKICAgICAgICAgICAgcmV0dXJuIChOb25lLCB7Imhvc3QiOiBob3N0X25hbWUodXJsKSArICIgKFdlYikiLCAidXJsIjogdXJsLCAiaGVhZGVycyI6IHsiVXNlci1BZ2VudCI6IFVBLCAiUmVmZXJlciI6ICJodHRwczovL2ZpbG1hbi5jYy8ifSwgImxhbmd1YWdlIjogbGFuZ3VhZ2UsICJxdWFsaXR5IjogcXVhbGl0eX0pCiAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgIHJldHVybiBOb25lLCBOb25lCgpjbGFzcyBUaHJlYWRpbmdIVFRQU2VydmVyKFRocmVhZGluZ01peEluLCBIVFRQU2VydmVyKToKICAgIGRhZW1vbl90aHJlYWRzID0gVHJ1ZQogICAgYWxsb3dfcmV1c2VfYWRkcmVzcyA9IFRydWUKCmNsYXNzIFJlc29sdmVySGFuZGxlcihCYXNlSFRUUFJlcXVlc3RIYW5kbGVyKToKICAgIGRlZiBfc2VuZF9qc29uKHNlbGYsIHN0YXR1czogaW50LCBwYXlsb2FkKToKICAgICAgICBib2R5ID0ganNvbi5kdW1wcyhwYXlsb2FkKS5lbmNvZGUoInV0Zi04IikKICAgICAgICBzZWxmLnNlbmRfcmVzcG9uc2Uoc3RhdHVzKQogICAgICAgIHNlbGYuc2VuZF9oZWFkZXIoIkNvbnRlbnQtVHlwZSIsICJhcHBsaWNhdGlvbi9qc29uOyBjaGFyc2V0PXV0Zi04IikKICAgICAgICBzZWxmLnNlbmRfaGVhZGVyKCJDb250ZW50LUxlbmd0aCIsIHN0cihsZW4oYm9keSkpKQogICAgICAgIHNlbGYuZW5kX2hlYWRlcnMoKQogICAgICAgIHNlbGYud2ZpbGUud3JpdGUoYm9keSkKICAgIGRlZiBkb19HRVQoc2VsZik6CiAgICAgICAgc2VsZi5fc2VuZF9qc29uKDIwMCwgeyJzdGF0dXMiOiAib2siLCAibGlicmVzb2x2ZXVybCI6IExJQlJFU09MVkVVUkxfQVZBSUxBQkxFfSkKICAgIGRlZiBkb19QT1NUKHNlbGYpOgogICAgICAgIGlmIG5vdCBzZWxmLnBhdGguc3RhcnRzd2l0aCgiL3Jlc29sdmUiKToKICAgICAgICAgICAgc2VsZi5fc2VuZF9qc29uKDQwNCwgeyJlcnJvciI6ICJOb3QgZm91bmQifSkKICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgdHJ5OgogICAgICAgICAgICBsZW5ndGggPSBpbnQoc2VsZi5oZWFkZXJzLmdldCgiQ29udGVudC1MZW5ndGgiLCAiMCIpKQogICAgICAgICAgICByYXdfYm9keSA9IHNlbGYucmZpbGUucmVhZChsZW5ndGgpLmRlY29kZSgidXRmLTgiLCBlcnJvcnM9Imlnbm9yZSIpCiAgICAgICAgICAgIGRhdGEgPSBqc29uLmxvYWRzKHJhd19ib2R5KSBpZiByYXdfYm9keSBlbHNlIFtdCiAgICAgICAgICAgIGxpbmtzID0gZGF0YSBpZiBpc2luc3RhbmNlKGRhdGEsIGxpc3QpIGVsc2UgZGF0YS5nZXQoImxpbmtzIiwgW10pCiAgICAgICAgICAgIHJlc3VsdHMsIGZhbGxiYWNrcyA9IFtdLCBbXQogICAgICAgICAgICBpZiBsaW5rczoKICAgICAgICAgICAgICAgIGV4ID0gVGhyZWFkUG9vbEV4ZWN1dG9yKG1heF93b3JrZXJzPTgpCiAgICAgICAgICAgICAgICBmdXR1cmVzID0gW2V4LnN1Ym1pdChyZXNvbHZlX3NpbmdsZV9pdGVtLCBpdGVtKSBmb3IgaXRlbSBpbiBsaW5rc1s6MTRdXQogICAgICAgICAgICAgICAgZG9uZSwgbm90X2RvbmUgPSB3YWl0KGZ1dHVyZXMsIHRpbWVvdXQ9MTQuMCkKICAgICAgICAgICAgICAgIGZvciBmdXQgaW4gZG9uZToKICAgICAgICAgICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICAgICAgICAgIHJlcywgZmIgPSBmdXQucmVzdWx0KCkKICAgICAgICAgICAgICAgICAgICAgICAgaWYgcmVzOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgcmVzdWx0cy5hcHBlbmQocmVzKQogICAgICAgICAgICAgICAgICAgICAgICBlbGlmIGZiOgogICAgICAgICAgICAgICAgICAgICAgICAgICAgZmFsbGJhY2tzLmFwcGVuZChmYikKICAgICAgICAgICAgICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICAgICAgICAgICAgICBwYXNzCiAgICAgICAgICAgICAgICBmb3IgZnV0IGluIG5vdF9kb25lOgogICAgICAgICAgICAgICAgICAgIGZ1dC5jYW5jZWwoKQogICAgICAgICAgICAgICAgZXguc2h1dGRvd24od2FpdD1GYWxzZSkKICAgICAgICAgICAgZmluYWxfb3V0ID0gcmVzdWx0cyBpZiBsZW4ocmVzdWx0cykgPiAwIGVsc2UgZmFsbGJhY2tzCiAgICAgICAgICAgIHNlbGYuX3NlbmRfanNvbigyMDAsIGZpbmFsX291dCkKICAgICAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGU6CiAgICAgICAgICAgIHNlbGYuX3NlbmRfanNvbig1MDAsIHsiZXJyb3IiOiBzdHIoZSl9KQoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIHBvcnQgPSBpbnQob3MuZW52aXJvbi5nZXQoIlJFU09MVkVSX1BPUlQiLCAiODA4MCIpKQogICAgcHJpbnQoZiJSZXNvbHZlVVJMIHNlcnZlciBzdGFydGluZyBvbiBodHRwOi8vMC4wLjAuMDp7cG9ydH0iKQogICAgc3lzLnN0ZG91dC5mbHVzaCgpCiAgICBUaHJlYWRpbmdIVFRQU2VydmVyKCgiMC4wLjAuMCIsIHBvcnQpLCBSZXNvbHZlckhhbmRsZXIpLnNlcnZlX2ZvcmV2ZXIoKQo="
+          main_py_bytes = base64.b64decode(main_py_b64)
+          import ast
+          ast.parse(main_py_bytes.decode("utf-8"))
+          with open(os.path.join(work, "main.py"), "wb") as f:
+              f.write(main_py_bytes)
 
           shutil.make_archive('app/app', 'zip', work)
           sha256_hash = hashlib.sha256(open('app/app.zip', 'rb').read()).hexdigest()
@@ -755,20 +614,31 @@ jobs:
           p_emovie = 'lib/data/repositories/ekino/ekino_movie_repository.dart'
           s_emovie = open(p_emovie, encoding='utf-8').read()
           s_emovie = s_emovie.replace('SupportedService.obejrzyjto', 'SupportedService.ekino').replace('https://ekino-tv.pl', 'https://ekino.ws')
-          new_ekino_gate = """final gateUrl = '/watch/f/$hostName/$hostId';
+          s_emovie = s_emovie.replace("ShowPlayer('([^']+)','([^']+)')", r"ShowPlayer\\(\\s*'([^']+)'\\s*,\\s*'([^']+)'\\s*\\)")
+          new_ekino_gate = """if (hostName.toLowerCase().contains('upzone')) continue;
+                final gateUrl = '/watch/f/$hostName/$hostId';
                 String? videoUrl;
                 try {
                   final gateResp = await _dio!.get(gateUrl);
                   final gateDoc = html.parse(gateResp.data);
-                  videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ?? gateDoc.querySelector('a[href*="http"]')?.attributes['href'];
+                  videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ?? gateDoc.querySelector('a[href*="play.ekino"]')?.attributes['href'] ?? gateDoc.querySelector('a[href*="http"]')?.attributes['href'];
                   if (videoUrl != null && videoUrl.contains('ekino.link')) {
-                    final linkResp = await Dio(BaseOptions(headers: {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36', 'Referer': 'https://ekino.ws/'}, connectTimeout: const Duration(seconds: 4), receiveTimeout: const Duration(seconds: 4), validateStatus: (_) => true)).get(videoUrl);
+                    final linkResp = await Dio(BaseOptions(headers: {'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36', 'Referer': 'https://ekino.ws/'}, connectTimeout: const Duration(seconds: 5), receiveTimeout: const Duration(seconds: 5), validateStatus: (_) => true)).get(videoUrl);
                     final linkDoc = html.parse(linkResp.data);
                     final ifr = linkDoc.querySelector('iframe')?.attributes['src'];
-                    if (ifr != null && ifr.isNotEmpty) videoUrl = ifr;
+                    if (ifr != null && ifr.isNotEmpty) {
+                      videoUrl = ifr;
+                    } else {
+                      videoUrl = null;
+                    }
                   }
-                } catch (_) {}"""
-          s_emovie = re.sub(r"final gateUrl = '/watch/f/\$hostName/\$hostId';[\s\S]*?\?\.attributes\['href'\];", new_ekino_gate, s_emovie)
+                  if (videoUrl != null && (videoUrl.contains('upzone.cc') || videoUrl.contains('ekino.ws') || videoUrl.contains('ekino-tv.pl') || videoUrl.contains('ekino.link'))) {
+                    videoUrl = null;
+                  }
+                } catch (_) {
+                  videoUrl = null;
+                }"""
+          s_emovie = re.sub(r"final gateUrl = '/watch/f/\\$hostName/\\$hostId';[\\s\\S]*?\\?\\.attributes\\['href'\\];", new_ekino_gate, s_emovie)
           open(p_emovie, 'w', encoding='utf-8').write(s_emovie)
 
           print('=== 4. Patching filman_movie_repository.dart ===')
@@ -782,10 +652,74 @@ jobs:
           s_fmr = s_fmr.replace('if (tableData.length < 3) continue;', 'if (tableData.isEmpty) continue;')
           open(p_fmr, 'w', encoding='utf-8').write(s_fmr)
 
-          print('=== 5. Patching resolve_url_service.dart (fast polling & non-blocking fallback) ===')
+          print('=== 5. Patching resolve_url_service.dart (native stream resolution with 22s receiveTimeout) ===')
           p_rus = 'lib/core/services/resolve_url_service.dart'
-          new_rus = '''import "dart:convert";\nimport "package:dio/dio.dart";\nimport "package:flutter/cupertino.dart";\nimport "package:purevideo/data/models/link_model.dart";\nimport "package:purevideo/data/repositories/video_source_repository.dart";\n\nclass ResolveUrlService {\n  final Dio _dio;\n  String serverUrl = "http://localhost:8080";\n  ResolveUrlService(this._dio);\n\n  Future<List<VideoSource>> resolve(List<HostLink> urls) async {\n    debugPrint("Resolving URLs: $urls");\n    final validUrls = urls.where((u) => u.url.trim().isNotEmpty).toList();\n    if (validUrls.isEmpty) return [];\n\n    final fallbackSources = validUrls.map((u) {\n      String hostName = "Odtwarzacz (Web)";\n      try {\n        final uri = Uri.parse(u.url);\n        if (uri.host.isNotEmpty) {\n          hostName = "${uri.host.replaceFirst('www.', '').split('.').first.toUpperCase()} (Web)";\n        }\n      } catch (_) {}\n      return VideoSource(url: u.url, lang: u.lang, quality: u.quality, host: hostName, headers: const {"Referer": "https://filman.cc/"});\n    }).toList();\n\n    try {\n      final isUp = await _waitForServer();\n      if (!isUp) {\n        debugPrint("Resolver server not ready, using fallback sources immediately");\n        return fallbackSources;\n      }\n      final response = await _dio.post(\n        "$serverUrl/resolve",\n        data: jsonEncode(validUrls.map((link) => {"url": link.url, "language": link.lang, "quality": link.quality}).toList()),\n        options: Options(headers: {"Content-Type": "application/json"}, connectTimeout: const Duration(seconds: 2), receiveTimeout: const Duration(seconds: 4), sendTimeout: const Duration(seconds: 2), validateStatus: (status) => status != null && status < 500),\n      );\n      if (response.data is List && (response.data as List).isNotEmpty) {\n        final resolved = (response.data as List).map((item) => VideoSource(url: item["url"] ?? "", lang: item["language"] ?? "", quality: item["quality"] ?? "", host: item["host"] ?? "Wideo", headers: item["headers"] != null ? Map<String, String>.from(item["headers"]) : null)).where((s) => s.url.isNotEmpty).toList();\n        if (resolved.isNotEmpty) return resolved;\n      }\n      return fallbackSources;\n    } catch (e) {\n      debugPrint("Error resolving URLs: $e");\n      return fallbackSources;\n    }\n  }\n\n  Future<bool> _waitForServer() async {\n    for (var i = 0; i < 5; i++) {\n      try {\n        final r = await _dio.get("$serverUrl/health", options: Options(connectTimeout: const Duration(milliseconds: 300), receiveTimeout: const Duration(milliseconds: 300), sendTimeout: const Duration(milliseconds: 300), validateStatus: (_) => true));\n        if (r.statusCode == 200) return true;\n      } catch (_) {}\n      await Future.delayed(const Duration(milliseconds: 200));\n    }\n    return false;\n  }\n}\n'''
-          open(p_rus, 'w', encoding='utf-8').write(new_rus)
+          new_rus = """import "dart:convert";
+          import "package:dio/dio.dart";
+          import "package:flutter/cupertino.dart";
+          import "package:purevideo/data/models/link_model.dart";
+          import "package:purevideo/data/repositories/video_source_repository.dart";
+
+          class ResolveUrlService {
+            final Dio _dio;
+            String serverUrl = "http://localhost:8080";
+            ResolveUrlService(this._dio);
+
+            Future<List<VideoSource>> resolve(List<HostLink> urls) async {
+              debugPrint("Resolving URLs: $urls");
+              final validUrls = urls.where((u) => u.url.trim().isNotEmpty && !u.url.contains('upzone.cc') && !u.url.contains('ekino.link')).toList();
+              if (validUrls.isEmpty) return [];
+
+              final fallbackSources = validUrls.map((u) {
+                String hostName = "Odtwarzacz (Web)";
+                try {
+                  final uri = Uri.parse(u.url);
+                  if (uri.host.isNotEmpty) {
+                    hostName = "${uri.host.replaceFirst('www.', '').split('.').first.toUpperCase()} (Web)";
+                  }
+                } catch (_) {}
+                return VideoSource(url: u.url, lang: u.lang, quality: u.quality, host: hostName, headers: const {"Referer": "https://filman.cc/"});
+              }).toList();
+
+              try {
+                final isUp = await _waitForServer();
+                if (!isUp) {
+                  debugPrint("Resolver server not ready after waiting, using fallback sources");
+                  return fallbackSources;
+                }
+                final response = await _dio.post(
+                  "$serverUrl/resolve",
+                  data: jsonEncode(validUrls.map((link) => {"url": link.url, "language": link.lang, "quality": link.quality}).toList()),
+                  options: Options(headers: {"Content-Type": "application/json"}, connectTimeout: const Duration(seconds: 5), receiveTimeout: const Duration(seconds: 22), sendTimeout: const Duration(seconds: 5), validateStatus: (status) => status != null && status < 500),
+                );
+                if (response.data is List && (response.data as List).isNotEmpty) {
+                  final resolved = (response.data as List).map((item) => VideoSource(url: item["url"] ?? "", lang: item["language"] ?? "", quality: item["quality"] ?? "", host: item["host"] ?? "Wideo", headers: item["headers"] != null ? Map<String, String>.from(item["headers"]) : null)).where((s) => s.url.isNotEmpty).toList();
+                  if (resolved.isNotEmpty) {
+                    final nativeOnly = resolved.where((s) => !s.host.contains('(Web)')).toList();
+                    if (nativeOnly.isNotEmpty) return nativeOnly;
+                    return resolved;
+                  }
+                }
+                return fallbackSources;
+              } catch (e) {
+                debugPrint("Error resolving URLs: $e");
+                return fallbackSources;
+              }
+            }
+
+            Future<bool> _waitForServer() async {
+              for (var i = 0; i < 30; i++) {
+                try {
+                  final r = await _dio.get("$serverUrl/health", options: Options(connectTimeout: const Duration(milliseconds: 400), receiveTimeout: const Duration(milliseconds: 400), sendTimeout: const Duration(milliseconds: 400), validateStatus: (_) => true));
+                  if (r.statusCode == 200) return true;
+                } catch (_) {}
+                await Future.delayed(const Duration(milliseconds: 250));
+              }
+              return false;
+            }
+          }
+          """
+          write_dart(p_rus, new_rus)
 
           print('=== 6. Patching player_bloc.dart & player_screen.dart ===')
           p_pb = 'lib/presentation/player/bloc/player_bloc.dart'
@@ -812,9 +746,43 @@ jobs:
                         initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: const {'Referer': 'https://filman.cc/'}),
                         initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'),
                         onCreateWindow: (controller, action) async => false,
+                        onLoadStop: (controller, loadedUrl) async {
+                          await controller.evaluateJavascript(source: """
+                            (function() {
+                              window.open = function() { return null; };
+                              function cleanOverlays() {
+                                document.querySelectorAll('a[target="_blank"], div, iframe').forEach(function(el) {
+                                  var st = window.getComputedStyle(el);
+                                  var z = parseInt(st.zIndex, 10);
+                                  if (!isNaN(z) && z > 999 && !el.querySelector('video') && !el.classList.contains('jw-media') && !el.classList.contains('vjs-tech')) {
+                                    if (el.tagName === 'A' || st.opacity === '0' || st.backgroundColor === 'rgba(0, 0, 0, 0)') {
+                                      el.style.pointerEvents = 'none';
+                                      el.style.display = 'none';
+                                    }
+                                  }
+                                });
+                                var playBtn = document.querySelector('.vjs-big-play-button, .jw-icon-display, .plyr__control--overlaid');
+                                if (playBtn) { try { playBtn.click(); } catch(e) {} }
+                                var vid = document.querySelector('video');
+                                if (vid && vid.paused) { try { vid.play(); } catch(e) {} }
+                              }
+                              cleanOverlays();
+                              setInterval(cleanOverlays, 1000);
+                            })();
+                          """);
+                        },
                         shouldOverrideUrlLoading: (controller, nav) async {
                           final u = nav.request.url?.toString() ?? '';
                           if (!u.startsWith('http')) return NavigationActionPolicy.CANCEL;
+                          if (nav.isForMainFrame) {
+                            final initHost = Uri.tryParse(selectedUrl)?.host.replaceFirst('www.', '') ?? '';
+                            final targetHost = Uri.tryParse(u)?.host.replaceFirst('www.', '') ?? '';
+                            if (initHost.isNotEmpty && targetHost.isNotEmpty && targetHost != initHost) {
+                              final p = Uri.tryParse(u)?.path ?? '';
+                              final isEmbedPath = p.startsWith('/e/') || p.startsWith('/d/') || p.startsWith('/embed');
+                              if (!isEmbedPath) return NavigationActionPolicy.CANCEL;
+                            }
+                          }
                           return NavigationActionPolicy.ALLOW;
                         },
                       ),
@@ -886,7 +854,7 @@ jobs:
           if mdb_old in s_mdb:
               s_mdb = s_mdb.replace(mdb_old, mdb_new)
           if 'await _videoSourceRepository.scrapeVideoUrls(event.movie);' in s_mdb:
-              s_mdb = s_mdb.replace('await _videoSourceRepository.scrapeVideoUrls(event.movie);', 'await _videoSourceRepository.scrapeVideoUrls(event.movie).timeout(const Duration(seconds: 10), onTimeout: () => event.movie);')
+              s_mdb = s_mdb.replace('await _videoSourceRepository.scrapeVideoUrls(event.movie);', 'await _videoSourceRepository.scrapeVideoUrls(event.movie).timeout(const Duration(seconds: 28), onTimeout: () => event.movie);')
           open(p_mdb, 'w', encoding='utf-8').write(s_mdb)
 
           p_main = 'lib/main.dart'
