@@ -80,13 +80,13 @@ jobs:
               open(p_net, 'w', encoding='utf-8').write(s_net)
 
           # Patch voesx.py to always prefer_hls (avoids int() sort crash and picks HLS directly)
-          p_voe = os.path.join(rurl_root, 'plugins', 'voesx.py')
+          p_voe = os.path.join(dst_rurl, 'lib', 'resolveurl', 'plugins', 'voesx.py')
           if os.path.exists(p_voe):
               s_voe = open(p_voe, encoding='utf-8').read()
               s_voe = s_voe.replace("if self.get_setting('prefer_hls') == 'true':", "if True:")
               open(p_voe, 'w', encoding='utf-8').write(s_voe)
 
-          open('/tmp/app_zip_build/.purevideo_v41', 'w', encoding='utf-8').write('v41')
+          open(os.path.join(work, '.purevideo_v41'), 'w', encoding='utf-8').write('v41')
 
           # Patch byse.py PoW timeout from 45s to 8s
           p_byse = os.path.join(dst_rurl, 'lib', 'resolveurl', 'plugins', 'byse.py')
