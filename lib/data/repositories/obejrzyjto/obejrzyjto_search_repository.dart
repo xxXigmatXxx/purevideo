@@ -48,39 +48,37 @@ class ObejrzyjtoSearchRepository extends SearchRepository {
       return [];
     }
 
-    final movies = <ServiceMovieModel>[];
-    // TODO: make this get watch url in get details or smth
-    for (final movieData in results) {
-      if (movieData == null) continue;
+    final futures = results.take(8).map((movieData) async {
+      if (movieData == null) return null;
 
       final title = movieData['name'] as String?;
       final imageUrl = movieData['poster'] as String?;
 
-      if (title == null || imageUrl == null) continue;
+      if (title == null || imageUrl == null) return null;
 
-      final detailsResponse =
-          await _dio!.get('/titles/${movieData['id']}/${generateSlug(title)}');
+      try {
+        final detailsResponse =
+            await _dio!.get('/titles/${movieData['id']}/${generateSlug(title)}');
 
-      final detailsBootstrapData = extractBootstrapData(detailsResponse.data);
+        final detailsBootstrapData =
+            extractBootstrapData(detailsResponse.data);
+        if (detailsBootstrapData == null) return null;
 
-      if (detailsBootstrapData == null) {
-        continue;
+        final primaryVideoId = detailsBootstrapData['loaders']?['titlePage']
+            ?['title']?['primary_video']?['id'] as int?;
+        if (primaryVideoId == null) return null;
+
+        return ServiceMovieModel(
+            service: SupportedService.obejrzyjto,
+            title: title,
+            imageUrl: imageUrl,
+            url: '/watch/$primaryVideoId');
+      } catch (_) {
+        return null;
       }
+    }).toList();
 
-      final primaryVideoId = detailsBootstrapData['loaders']?['titlePage']
-          ?['title']?['primary_video']?['id'] as int?;
-
-      if (primaryVideoId == null) {
-        continue;
-      }
-
-      movies.add(ServiceMovieModel(
-          service: SupportedService.obejrzyjto,
-          title: title,
-          imageUrl: imageUrl,
-          url: '/watch/$primaryVideoId'));
-    }
-
-    return movies;
+    final resolved = await Future.wait(futures);
+    return resolved.whereType<ServiceMovieModel>().toList();
   }
 }
