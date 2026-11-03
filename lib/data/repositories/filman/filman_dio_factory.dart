@@ -11,6 +11,9 @@ import 'package:purevideo/data/repositories/auth_repository.dart';
 import 'package:purevideo/di/injection_container.dart';
 
 class FilmanDioFactory {
+  static Future<List<Cookie>?>? _cfInFlight;
+  static DateTime _cfCooldownUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
   static Dio getDio([AccountModel? account]) {
     final dio = Dio(
       BaseOptions(
@@ -31,6 +34,13 @@ class FilmanDioFactory {
       InterceptorsWrapper(
         onResponse: (response, handler) async {
           if (response.data.toString().contains('Just a moment...')) {
+            // Never loop: one Cloudflare retry per request, and a cooldown
+            // after a failed attempt so the UI does not hang or spam dialogs.
+            if (response.requestOptions.extra['cf_retried'] == true ||
+                DateTime.now().isBefore(_cfCooldownUntil)) {
+              throw ServiceExeption(SupportedService.filman,
+                  'Cloudflare blokuje dostep (sprobuj ponownie za chwile)');
+            }
             final List<Cookie> initialCookies =
                 (response.requestOptions.headers['Cookie'] as String?)
                         ?.split(';')
@@ -39,11 +49,22 @@ class FilmanDioFactory {
                         .toList() ??
                     [];
 
-            final cookies = await getIt<WebViewService>().getCfCookies(
-              response.requestOptions.uri.toString(),
-              initialCookies: initialCookies,
-            );
+            _cfInFlight ??= getIt<WebViewService>()
+                .getCfCookies(
+                  response.requestOptions.uri.toString(),
+                  initialCookies: initialCookies,
+                )
+                .whenComplete(() => _cfInFlight = null);
+            final cookies = await _cfInFlight;
+            if (cookies == null ||
+                !cookies.any((c) => c.name == 'cf_clearance')) {
+              _cfCooldownUntil = DateTime.now().add(const Duration(seconds: 60));
+              throw ServiceExeption(SupportedService.filman,
+                  'Nie udalo sie przejsc weryfikacji Cloudflare');
+            }
             final requestOptions = response.requestOptions;
+            requestOptions.extra['cf_retried'] = true;
+            requestOptions.headers['User-Agent'] = WebViewService.cleanUserAgent;
             requestOptions.headers['Cookie'] = cookies
                 ?.map((cookie) => '${cookie.name}=${cookie.value}')
                 .join('; ');
