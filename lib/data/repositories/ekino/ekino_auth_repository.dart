@@ -49,14 +49,14 @@ class EkinoAuthRepository implements AuthRepository {
             'account',
           );
           _account = null;
-          _dio = EkinoDioFactory.getDio(null);
+          _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
         }
       } else {
-        _dio = EkinoDioFactory.getDio(null);
+        _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
       }
     } catch (e) {
       debugPrint('Błąd podczas ładowania konta Ekino: $e');
-      _dio = EkinoDioFactory.getDio(null);
+      _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
     }
   }
 
@@ -105,9 +105,9 @@ class EkinoAuthRepository implements AuthRepository {
         final response = await _dio.get(
           '/',
         );
-        if (response.headers['set-cookie'] != null) {
+        if (true) {
           final cookies = response.headers['set-cookie']
-                  ?.map((header) => Cookie.fromSetCookieValue(header))
+                  ?.map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
                   .toList() ??
               [];
 
@@ -145,7 +145,7 @@ class EkinoAuthRepository implements AuthRepository {
           final cookieList = (json['cookies'] as String).split(';');
 
           final cookies = cookieList
-              .map((header) => Cookie.fromSetCookieValue(header))
+              .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
               .toList();
 
           _account = AccountModel(
@@ -220,7 +220,7 @@ class EkinoAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     _account = null;
-    _dio = EkinoDioFactory.getDio(null);
+    _account = AccountModel(fields: const {'login': 'Gość'}, cookies: const [], service: SupportedService.ekino); _dio = EkinoDioFactory.getDio(_account); _authController.add(AuthModel(service: SupportedService.ekino, success: true, account: _account));
     _authController.add(
       AuthModel(
         service: SupportedService.ekino,

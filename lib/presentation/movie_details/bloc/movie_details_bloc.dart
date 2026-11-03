@@ -59,11 +59,11 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       if (loggedServiceEntries.isNotEmpty) {
         for (final loggedServiceEntry in loggedServiceEntries) {
           final result =
-              await loggedServiceEntry.value.searchMovies(event.movie.title);
+              await (() async { final q1 = event.movie.title.trim().isNotEmpty ? event.movie.title.trim() : event.movie.originalTitle.trim(); var r = await loggedServiceEntry.value.searchMovies(q1).timeout(const Duration(seconds: 7), onTimeout: () => []); if (r.isEmpty && event.movie.originalTitle.trim().isNotEmpty && event.movie.originalTitle.trim() != q1) { try { r = await loggedServiceEntry.value.searchMovies(event.movie.originalTitle.trim()).timeout(const Duration(seconds: 7), onTimeout: () => []); } catch (_) {} } return r; })();
           _mergeService.addFromServiceTemp(result, results);
         }
 
-        add(LoadMovieDetails(movie: results.first));
+        if (results.isEmpty) { emit(state.copyWith(errorMessage: 'Nie znaleziono wideo dla: ' + (event.movie.title.isNotEmpty ? event.movie.title : event.movie.originalTitle) + '. Upewnij się, że jesteś zalogowany w Ustawieniach.', isLoaded: true)); return; } add(LoadMovieDetails(movie: results.first));
       } else {
         emit(state.copyWith(
           errorMessage: 'Nie jesteś zalogowany do żadnego serwisu',
@@ -148,7 +148,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
     try {
       if (!event.movie.isSeries) {
         final updatedMovie =
-            await _videoSourceRepository.scrapeVideoUrls(event.movie);
+            await _videoSourceRepository.scrapeVideoUrls(event.movie).timeout(const Duration(seconds: 28), onTimeout: () => event.movie);
         emit(state.copyWith(movie: updatedMovie, isLoaded: true));
       }
     } catch (e) {

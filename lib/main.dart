@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
@@ -62,7 +63,7 @@ void main() async {
   ]);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  SeriousPython.run('app/app.zip').then((log) {
+  try { final sd = await getApplicationSupportDirectory(); final fd = Directory('${sd.path}/flet/app'); if (await fd.exists() && !await File('${fd.path}/.purevideo_v43').exists()) { debugPrint('Upgrading app.zip to v41'); await fd.delete(recursive: true); } } catch (_) {} SeriousPython.run('app/app.zip').then((log) {
     debugPrint('Python log: $log');
   }).catchError((error) {
     debugPrint('Error executing Python code: $error');

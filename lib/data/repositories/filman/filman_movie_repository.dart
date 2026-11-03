@@ -35,65 +35,7 @@ class FilmanMovieRepository implements MovieRepository {
     }
   }
 
-  Future<String> _resolveTempUrl(String tempUrl) async {
-    try {
-      final response = await Dio().get(
-        tempUrl,
-        options: Options(
-          followRedirects: false,
-          validateStatus: (_) => true,
-          headers: {
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 16; Pixel 8 Build/BP31.250610.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36',
-          },
-        ),
-      );
-
-      final String body = response.data.toString();
-
-      RegExp regExp = RegExp(r'''var _e\s*=\s*['"]([A-Za-z0-9+/=]+)['"]''');
-      RegExp regExpA = RegExp(r'''var _a\s*=\s*['"]([^'"]+)['"]''');
-      RegExp regExpB = RegExp(r'''var _b\s*=\s*['"]([^'"]+)['"]''');
-      RegExp regExpC = RegExp(r'''var _c\s*=\s*['"]([^'"]+)['"]''');
-
-      Match? matchE = regExp.firstMatch(body);
-      Match? matchA = regExpA.firstMatch(body);
-      Match? matchB = regExpB.firstMatch(body);
-      Match? matchC = regExpC.firstMatch(body);
-
-      if (matchE != null &&
-          matchA != null &&
-          matchB != null &&
-          matchC != null) {
-        String encoded = matchE.group(1)!;
-        String key = matchA.group(1)! + matchB.group(1)! + matchC.group(1)!;
-
-        debugPrint('Encoded found: $encoded');
-        debugPrint('Key: $key');
-
-        try {
-          List<int> raw = base64.decode(encoded);
-          List<int> keyBytes = key.codeUnits;
-          String result = String.fromCharCodes(
-            List.generate(
-                raw.length, (i) => raw[i] ^ keyBytes[i % keyBytes.length]),
-          );
-
-          debugPrint('Decoded URL: $result');
-          return result;
-        } catch (e) {
-          debugPrint('XOR decode failed: $e');
-          return '';
-        }
-      } else {
-        debugPrint('Could not find _e/_a/_b/_c in body');
-        return '';
-      }
-    } catch (e) {
-      debugPrint('Failed to resolve temp URL: $tempUrl - ${e.toString()}');
-      return tempUrl;
-    }
-  }
+  Future<String> _resolveTempUrl(String tempUrl) async => tempUrl;
 
   Future<List<HostLink>> _extractHostLinksFromDocument(
       dom.Document document) async {
@@ -106,7 +48,7 @@ class FilmanMovieRepository implements MovieRepository {
         final decoded = base64Decode(
             row.querySelector('a[data-iframe]')?.attributes['data-iframe'] ??
                 '');
-        link = (utf8.decode(decoded));
+        final d = utf8.decode(decoded).trim(); if (d.startsWith('{')) { try { final dynamic m = jsonDecode(d); link = (m is Map ? (m['src'] ?? m['url'] ?? d) : d).toString().trim(); } catch (_) { link = d; } } else { link = d; } if (link.startsWith('//')) link = 'https:$link';
       } catch (e) {
         debugPrint(
             'Failed to decode link: ${row.querySelector('a[data-iframe]')?.attributes['data-iframe']} - ${e.toString()}');
@@ -121,7 +63,7 @@ class FilmanMovieRepository implements MovieRepository {
       }
 
       final tableData = row.querySelectorAll('td');
-      if (tableData.length < 3) continue;
+      if (tableData.isEmpty) continue;
       final language = tableData[1].text.trim();
       final qualityVersion = tableData[2].text.trim();
 

@@ -57,6 +57,18 @@ final GoRouter router = GoRouter(
       },
     ),
     GoRoute(
+      path: '/movie',
+      name: 'movie_details_plain',
+      pageBuilder: (context, state) {
+        return NoTransitionPage(
+          child: state.uri.queryParameters['filmweb'] == 'true'
+              ? MovieDetailsScreen(
+                  filmwebData: state.extra as FilmwebPreviewModel)
+              : MovieDetailsScreen(movie: state.extra as MovieModel),
+        );
+      },
+    ),
+    GoRoute(
       path: '/movie/:title',
       name: 'movie_details',
       pageBuilder: (context, state) {

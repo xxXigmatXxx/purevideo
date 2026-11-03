@@ -45,7 +45,7 @@ class MovieModel {
 
   Map<String, String> get imageHeaders => {
         'User-Agent':
-            'Mozilla/5.0 (Linux; Android 16; Pixel 8 Build/BP31.250610.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36',
+            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
         'Cookie': getIt<Map<SupportedService, AuthRepository>>()[
                     services.first.service]
                 ?.getAccount()
@@ -194,7 +194,7 @@ class MovieDetailsModel {
       ? {}
       : {
           'User-Agent':
-              'Mozilla/5.0 (Linux; Android 16; Pixel 8 Build/BP31.250610.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36',
+              'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
           'Cookie': getIt<Map<SupportedService, AuthRepository>>()[
                       services.first.service]
                   ?.getAccount()

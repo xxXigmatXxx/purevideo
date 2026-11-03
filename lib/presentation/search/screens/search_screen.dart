@@ -31,7 +31,7 @@ class MovieListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => context.pushNamed('movie_details',
-          pathParameters: {'title': movie.title},
+          pathParameters: {'title': Uri.encodeComponent((movie.title.trim().isNotEmpty ? movie.title.trim() : (movie.originalTitle.trim().isNotEmpty ? movie.originalTitle.trim() : 'film')).replaceAll('/', '-'))},
           queryParameters: {'filmweb': 'true'},
           extra: movie),
       child: ClipRRect(

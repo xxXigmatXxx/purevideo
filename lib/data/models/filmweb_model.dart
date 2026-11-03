@@ -69,7 +69,7 @@ class FilmwebPreviewModel {
       id: filmwebId,
       year: json['year'] ?? 0,
       plot: json['plot']?['synopsis'] ?? '',
-      title: json['title']?['title'] ?? '',
+      title: (json['title'] is Map ? (json['title']['title'] ?? '') : (json['title']?.toString() ?? '')).toString().trim().isNotEmpty ? (json['title'] is Map ? (json['title']['title'] ?? '') : (json['title']?.toString() ?? '')).toString().trim() : ((json['originalTitle'] is Map ? (json['originalTitle']['title'] ?? '') : (json['originalTitle']?.toString() ?? '')).toString().trim().isNotEmpty ? (json['originalTitle'] is Map ? (json['originalTitle']['title'] ?? '') : (json['originalTitle']?.toString() ?? '')).toString().trim() : 'Film'),
       posterUrl: json['poster']?['path'] != null
           ? 'https://fwcdn.pl/fpo${json['poster']['path']}'
               .replaceAll('\$.jpg', '10.webp')

@@ -39,7 +39,7 @@ class EkinoSearchRepository extends SearchRepository {
     await _prepareDio();
 
     final response = await _dio!.get(
-      '/search/qf',
+      '/search/qf/',
       queryParameters: {'q': query},
     );
 
@@ -66,8 +66,8 @@ class EkinoSearchRepository extends SearchRepository {
       final cleanTitle = title.split(' - ').first.trim();
 
       String fullImageUrl = imageUrl;
-      if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {
-        fullImageUrl = 'https://ekino-tv.pl$imageUrl';
+      if (imageUrl.startsWith('//')) { fullImageUrl = 'https:$imageUrl'; } else if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {
+        fullImageUrl = 'https://ekino.ws$imageUrl';
       }
 
       movies.add(ServiceMovieModel(

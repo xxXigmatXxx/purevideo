@@ -245,7 +245,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         movieDetails = await _videoSourceRepository.scrapeVideoUrls(tempModel);
       } else {
         movieDetails = _movie!;
-        // await _videoSourceRepository.scrapeVideoUrls(_movie!); we already done this in movie details bloc
+        if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }
       }
 
       if (movieDetails.directUrls != null &&
@@ -332,15 +332,14 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       }
 
       debugPrint('[PlayerBloc] Opening media: ${event.source.url}');
-      await _player.open(
+      Future.delayed(const Duration(seconds: 6), () { if (!isClosed && state.isBuffering) emit(state.copyWith(isBuffering: false, isPlaying: true, displayState: '')); }); if (event.source.host.contains('(Web)')) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: '')); return; } await _player.open(
         Media(event.source.url,
             httpHeaders: headers,
             start: Duration(seconds: watchedPosition ?? 0)),
         play: true,
       );
 
-      // Don't emit isPlaying yet - wait for buffering state change
-      emit(state.copyWith(
+      emit(state.copyWith(isBuffering: false, isPlaying: true,
         selectedSource: event.source,
         displayState: '',
       ));

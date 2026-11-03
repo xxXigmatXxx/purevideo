@@ -45,7 +45,7 @@ class _ThemeScreenState extends State<ThemeScreen> {
                       },
                       trailing: Switch(
                         value: _settingsService.isDarkMode,
-                        activeThumbColor: _settingsService.isSystemBrightness
+                        activeColor: _settingsService.isSystemBrightness
                             ? Colors.grey
                             : null,
                         onChanged: (value) {

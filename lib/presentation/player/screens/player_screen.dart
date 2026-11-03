@@ -1,3 +1,4 @@
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -150,6 +151,101 @@ class PlayerView extends StatelessWidget {
   }
 
   Widget _buildPlayerView(BuildContext context, PlayerState state) {
+    final selectedUrl = state.selectedSource?.url ?? '';
+    final isWeb = (state.selectedSource?.host ?? '').contains('(Web)');
+    if (selectedUrl.isNotEmpty && isWeb) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            InAppWebView(
+              key: ValueKey(selectedUrl),
+              initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: const {'Referer': 'https://filman.cc/'}),
+              initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'),
+              onCreateWindow: (controller, action) async => false,
+              onLoadResource: (controller, resource) {
+                final rUrl = resource.url.toString();
+                final lower = rUrl.toLowerCase();
+                if ((lower.contains('.m3u8') || lower.contains('.mp4')) &&
+                    !lower.contains('vast') &&
+                    !lower.contains('preroll') &&
+                    rUrl.startsWith('http')) {
+                  if (context.mounted) {
+                    final curOrigin = Uri.tryParse(selectedUrl)?.origin ?? 'https://filman.cc';
+                    context.read<PlayerBloc>().add(
+                      ChangeVideoSource(
+                        source: VideoSource(
+                          url: rUrl,
+                          lang: state.selectedSource?.lang ?? 'PL',
+                          quality: state.selectedSource?.quality ?? 'HD',
+                          host: (state.selectedSource?.host ?? 'Wideo').replaceAll('(Web)', '').trim(),
+                          headers: {
+                            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+                            'Referer': '/',
+                            'Origin': curOrigin,
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                }
+              },
+              onLoadStop: (controller, loadedUrl) async {
+                await controller.evaluateJavascript(source: """
+                  (function() {
+                    window.open = function() { return null; };
+                    function cleanOverlays() {
+                      document.querySelectorAll('a[target="_blank"]').forEach(function(el) {
+                        el.style.pointerEvents = 'none';
+                        el.style.display = 'none';
+                      });
+                    }
+                    cleanOverlays();
+                    setInterval(cleanOverlays, 1000);
+                  })();
+                """);
+              },
+              shouldOverrideUrlLoading: (controller, nav) async {
+                final u = nav.request.url?.toString() ?? '';
+                if (!u.startsWith('http')) return NavigationActionPolicy.CANCEL;
+                if (nav.isForMainFrame) {
+                  final initHost = Uri.tryParse(selectedUrl)?.host.replaceFirst('www.', '') ?? '';
+                  final targetHost = Uri.tryParse(u)?.host.replaceFirst('www.', '') ?? '';
+                  if (initHost.isNotEmpty && targetHost.isNotEmpty && targetHost != initHost) {
+                    final p = Uri.tryParse(u)?.path ?? '';
+                    final isEmbedPath = p.startsWith('/e/') || p.startsWith('/d/') || p.startsWith('/embed');
+                    if (!isEmbedPath) return NavigationActionPolicy.CANCEL;
+                  }
+                }
+                return NavigationActionPolicy.ALLOW;
+              },
+            ),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  color: Colors.black54,
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.of(context).pop()),
+                      Expanded(child: Text('${state.selectedSource?.host ?? "Odtwarzacz"} • ${state.selectedSource?.quality ?? ""} ${state.selectedSource?.lang ?? ""}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                      if (state.videoSources != null && state.videoSources!.length > 1)
+                        PopupMenuButton<VideoSource>(
+                          icon: const Icon(Icons.settings, color: Colors.white),
+                          onSelected: (source) => context.read<PlayerBloc>().add(ChangeVideoSource(source: source)),
+                          itemBuilder: (context) => state.videoSources!.map((source) => PopupMenuItem<VideoSource>(value: source, child: Text('${source.host}: ${source.quality} - ${source.lang}'))).toList(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final bloc = context.read<PlayerBloc>();
 
     return Scaffold(

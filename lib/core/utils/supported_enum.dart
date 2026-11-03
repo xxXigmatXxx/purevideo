@@ -24,7 +24,7 @@ extension SupportedServiceExtension on SupportedService {
   String get displayName => switch (this) {
         SupportedService.filman => 'Filman.cc',
         SupportedService.obejrzyjto => 'Obejrzyj.to',
-        SupportedService.ekino => 'Ekino-tv.pl',
+        SupportedService.ekino => 'Ekino.ws',
       };
 
   String get image => switch (this) {
@@ -32,14 +32,14 @@ extension SupportedServiceExtension on SupportedService {
           'https://filman.cc/public/dist/images/logo.png',
         SupportedService.obejrzyjto =>
           'https://obejrzyj.to/storage/branding_media/ead386d3-fca5-4082-8754-2a0992ae8c22.png',
-        SupportedService.ekino => 'https://ekino-tv.pl/views/img/logo.png'
+        SupportedService.ekino => 'https://ekino.ws/views/img/logo.png'
       };
 
   List<Map<String, InputType>> get loginRequiredFields => switch (this) {
         SupportedService.filman => [
             {'login': InputType.text},
             {'password': InputType.password},
-            {'g-recaptcha-response': InputType.recaptcha},
+            
           ],
         SupportedService.obejrzyjto => [
             {'email': InputType.text},
@@ -54,13 +54,13 @@ extension SupportedServiceExtension on SupportedService {
   bool get canBeAnonymous => switch (this) {
         SupportedService.filman => false,
         SupportedService.obejrzyjto => true,
-        SupportedService.ekino => false,
+        SupportedService.ekino => true,
       };
 
   String get baseUrl => switch (this) {
         SupportedService.filman => 'https://filman.cc',
         SupportedService.obejrzyjto => 'https://obejrzyj.to',
-        SupportedService.ekino => 'https://ekino-tv.pl',
+        SupportedService.ekino => 'https://ekino.ws',
       };
 
   CaptchaConfig get loginCaptchaConfig => switch (this) {
