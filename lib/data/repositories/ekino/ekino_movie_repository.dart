@@ -192,8 +192,7 @@ class EkinoMovieRepository implements MovieRepository {
       }
       if (videoUrl == null ||
           videoUrl.isEmpty ||
-          videoUrl.contains('upzone.cc') ||
-          videoUrl.contains('ekino.link')) {
+          videoUrl.contains('upzone.cc')) {
         continue;
       }
       videoUrls.add(HostLink(
