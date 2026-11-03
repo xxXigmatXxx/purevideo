@@ -1,0 +1,30 @@
+name: Materialize patches
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract and run the old CI patch script
+        run: |
+          awk '/python3 - << .PYEOF./{f=1;next} /^ *PYEOF$/{f=0} f' .github/workflows/build-apk.yml | sed 's/^          //' > /tmp/patch.py
+          wc -l /tmp/patch.py
+          python3 /tmp/patch.py
+
+      - name: Commit patched sources
+        run: |
+          git config user.name "purevideo-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A -- . ':!.github'
+          git status --short | head -50
+          git commit -m "Materialize CI patches into source" || echo "nothing to commit"
+          git push
