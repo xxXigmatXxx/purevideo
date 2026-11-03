@@ -1,3 +1,4 @@
+import 'package:purevideo/core/utils/safe_cookie.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -132,7 +133,7 @@ if (!window._filmanCaptchaTimer) {
         final cookies = cookieList
   .map((h) => h.trim())
   .where((h) => h.contains('=') && !h.startsWith('='))
-  .map((h) => Cookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+  .map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
   .toList();
         _account = AccountModel(
 fields: fields,
