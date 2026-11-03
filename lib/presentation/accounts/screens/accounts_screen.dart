@@ -13,6 +13,11 @@ import 'package:go_router/go_router.dart';
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key});
 
+  static const _activeServices = [
+    SupportedService.filman,
+    SupportedService.obejrzyjto,
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -28,9 +33,9 @@ class AccountsScreen extends StatelessWidget {
                   ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: SupportedService.values.length,
+                    itemCount: _activeServices.length,
                     itemBuilder: (context, index) {
-                      final service = SupportedService.values[index];
+                      final service = _activeServices[index];
                       final isLoggedIn = state.accounts.containsKey(service);
 
                       if (isLoggedIn) {
