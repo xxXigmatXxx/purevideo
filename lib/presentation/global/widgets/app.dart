@@ -15,15 +15,44 @@ class PureVideoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SettingsListenable(builder: (context, box, child) {
+      const netflixRed = Color(0xFFE50914);
+      final isNetflix = _settingsService.isNetflixStyle;
+      final seedColor = isNetflix ? netflixRed : Colors.deepPurple;
+
+      final darkColorScheme = isNetflix
+          ? ColorScheme.fromSeed(
+              seedColor: netflixRed,
+              brightness: Brightness.dark,
+              primary: netflixRed,
+              onPrimary: Colors.white,
+              surface: const Color(0xFF0A0A0A),
+              surfaceContainerHighest: const Color(0xFF1F1F1F),
+            )
+          : ColorScheme.fromSeed(
+              seedColor: Colors.deepPurple,
+              brightness: Brightness.dark,
+            );
+
       return MaterialApp.router(
         title: 'PureVideo',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: seedColor,
+            primary: isNetflix ? netflixRed : null,
+          ),
           useMaterial3: true,
         ),
         darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.deepPurple, brightness: Brightness.dark),
+          colorScheme: darkColorScheme,
+          scaffoldBackgroundColor: isNetflix ? Colors.black : null,
+          canvasColor: isNetflix ? const Color(0xFF121212) : null,
+          appBarTheme: isNetflix
+              ? const AppBarTheme(
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                )
+              : null,
           brightness: Brightness.dark,
           useMaterial3: true,
         ),

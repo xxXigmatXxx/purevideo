@@ -39,9 +39,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Aplikacja',
             items: [
               SettingsItem(
-                icon: Icons.dark_mode_outlined,
-                title: 'Motyw',
-                subtitle: 'Wygląd aplikacji',
+                icon: Icons.palette_outlined,
+                title: 'Motywy',
+                subtitle: 'Styl interfejsu (Netflix / Oryginalny) oraz ikona i nazwa aplikacji',
                 onTap: () {
                   context.pushNamed('theme');
                 },

@@ -67,45 +67,47 @@ class _CustomBottomNavigationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF121212),
+        border: Border(
+          top: BorderSide(color: Color(0xFF262626), width: 0.6),
+        ),
+      ),
       height: 60 + MediaQuery.of(context).padding.bottom,
       child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _NavBarItem(
-                  icon: Icons.home_outlined,
-                  activeIcon: Icons.home,
-                  label: 'Główna',
-                  isSelected: currentIndex == 0,
-                  onTap: () => onTap(0),
-                ),
-                _NavBarItem(
-                  icon: Icons.search_outlined,
-                  activeIcon: Icons.search,
-                  label: 'Szukaj',
-                  isSelected: currentIndex == 1,
-                  onTap: () => onTap(1),
-                ),
-                _NavBarItem(
-                  icon: Icons.history_outlined,
-                  activeIcon: Icons.history,
-                  label: 'Oglądane',
-                  isSelected: currentIndex == 2,
-                  onTap: () => onTap(2),
-                ),
-                _NavBarItem(
-                  icon: Icons.settings_outlined,
-                  activeIcon: Icons.settings,
-                  label: 'Ustawienia',
-                  isSelected: currentIndex == 3,
-                  onTap: () => onTap(3),
-                ),
-              ],
-            );
-          },
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _NavBarItem(
+              icon: Icons.home_outlined,
+              activeIcon: Icons.home_filled,
+              label: 'Strona główna',
+              isSelected: currentIndex == 0,
+              onTap: () => onTap(0),
+            ),
+            _NavBarItem(
+              icon: Icons.search_outlined,
+              activeIcon: Icons.search,
+              label: 'Szukaj',
+              isSelected: currentIndex == 1,
+              onTap: () => onTap(1),
+            ),
+            _NavBarItem(
+              icon: Icons.video_library_outlined,
+              activeIcon: Icons.video_library,
+              label: 'Moje PureVideo',
+              isSelected: currentIndex == 2,
+              onTap: () => onTap(2),
+            ),
+            _NavBarItem(
+              icon: Icons.settings_outlined,
+              activeIcon: Icons.settings,
+              label: 'Ustawienia',
+              isSelected: currentIndex == 3,
+              onTap: () => onTap(3),
+            ),
+          ],
         ),
       ),
     );
@@ -129,42 +131,38 @@ class _NavBarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final activeColor = Colors.white;
+    final inactiveColor = Colors.white.withAlpha(130);
     return Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          splashColor:
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.05),
-          highlightColor:
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-          child: SizedBox(
-            width: 64,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  isSelected ? activeIcon : icon,
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 82,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                isSelected ? activeIcon : icon,
+                size: 24,
+                color: isSelected ? activeColor : inactiveColor,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: isSelected ? activeColor : inactiveColor,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withAlpha(153),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ));
+        ),
+      ),
+    );
   }
 }

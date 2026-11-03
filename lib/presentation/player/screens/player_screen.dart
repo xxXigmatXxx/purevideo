@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,8 @@ import 'package:purevideo/presentation/player/bloc/player_event.dart';
 import 'package:purevideo/presentation/player/bloc/player_state.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:flutter_cast_framework/widgets.dart';
+
+const Color _kNetflixRed = Color(0xFFE50914);
 
 class PlayerScreen extends StatefulWidget {
   final MovieDetailsModel movie;
@@ -61,12 +64,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    // Add dispose event to save watched progress
-    // This is async but we don't wait - bloc will handle it
     _playerBloc.add(const DisposePlayer());
-
-    // Must call super.dispose() synchronously
-    // The DisposePlayer event will execute while the bloc is closing
     super.dispose();
   }
 
@@ -84,8 +82,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-class PlayerView extends StatelessWidget {
+class PlayerView extends StatefulWidget {
   const PlayerView({super.key});
+
+  @override
+  State<PlayerView> createState() => _PlayerViewState();
+}
+
+class _PlayerViewState extends State<PlayerView> {
+  double? _draggingProgress;
+  double _brightness = 0.5;
+  Timer? _seekReleaseTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _initBrightness();
+  }
+
+  Future<void> _initBrightness() async {
+    try {
+      final b = await ScreenBrightness.instance.application;
+      if (mounted) {
+        setState(() {
+          _brightness = b.clamp(0.0, 1.0);
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _seekReleaseTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,24 +142,26 @@ class PlayerView extends StatelessWidget {
   }
 
   Widget _buildLoadingView(BuildContext context, PlayerState state) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(color: colorScheme.primary),
+            const CircularProgressIndicator(color: _kNetflixRed),
             const SizedBox(height: 16),
             Text(
               state.displayState,
               style: const TextStyle(color: Colors.white),
             ),
             const SizedBox(height: 16),
-            FilledButton.icon(
+            OutlinedButton.icon(
               onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.arrow_back),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white38),
+              ),
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
               label: const Text('Anuluj'),
             ),
           ],
@@ -140,7 +172,7 @@ class PlayerView extends StatelessWidget {
 
   Widget _buildErrorView(BuildContext context, PlayerState state) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.black,
       body: ErrorView(
         message: state.errorMessage!,
         onRetry: () {
@@ -160,8 +192,22 @@ class PlayerView extends StatelessWidget {
           children: [
             InAppWebView(
               key: ValueKey(selectedUrl),
-              initialUrlRequest: URLRequest(url: WebUri(selectedUrl), headers: const {'Referer': 'https://filman.cc/'}),
-              initialSettings: InAppWebViewSettings(javaScriptEnabled: true, domStorageEnabled: true, mediaPlaybackRequiresUserGesture: false, allowsInlineMediaPlayback: true, iframeAllowFullscreen: true, supportMultipleWindows: true, javaScriptCanOpenWindowsAutomatically: false, useShouldOverrideUrlLoading: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'),
+              initialUrlRequest: URLRequest(
+                url: WebUri(selectedUrl),
+                headers: const {'Referer': 'https://filman.cc/'},
+              ),
+              initialSettings: InAppWebViewSettings(
+                javaScriptEnabled: true,
+                domStorageEnabled: true,
+                mediaPlaybackRequiresUserGesture: false,
+                allowsInlineMediaPlayback: true,
+                iframeAllowFullscreen: true,
+                supportMultipleWindows: true,
+                javaScriptCanOpenWindowsAutomatically: false,
+                useShouldOverrideUrlLoading: true,
+                userAgent:
+                    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+              ),
               onCreateWindow: (controller, action) async => false,
               onLoadResource: (controller, resource) {
                 final rUrl = resource.url.toString();
@@ -171,22 +217,26 @@ class PlayerView extends StatelessWidget {
                     !lower.contains('preroll') &&
                     rUrl.startsWith('http')) {
                   if (context.mounted) {
-                    final curOrigin = Uri.tryParse(selectedUrl)?.origin ?? 'https://filman.cc';
+                    final curOrigin =
+                        Uri.tryParse(selectedUrl)?.origin ?? 'https://filman.cc';
                     context.read<PlayerBloc>().add(
-                      ChangeVideoSource(
-                        source: VideoSource(
-                          url: rUrl,
-                          lang: state.selectedSource?.lang ?? 'PL',
-                          quality: state.selectedSource?.quality ?? 'HD',
-                          host: (state.selectedSource?.host ?? 'Wideo').replaceAll('(Web)', '').trim(),
-                          headers: {
-                            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-                            'Referer': '/',
-                            'Origin': curOrigin,
-                          },
-                        ),
-                      ),
-                    );
+                          ChangeVideoSource(
+                            source: VideoSource(
+                              url: rUrl,
+                              lang: state.selectedSource?.lang ?? 'PL',
+                              quality: state.selectedSource?.quality ?? 'HD',
+                              host: (state.selectedSource?.host ?? 'Wideo')
+                                  .replaceAll('(Web)', '')
+                                  .trim(),
+                              headers: {
+                                'User-Agent':
+                                    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+                                'Referer': '/',
+                                'Origin': curOrigin,
+                              },
+                            ),
+                          ),
+                        );
                   }
                 }
               },
@@ -209,11 +259,19 @@ class PlayerView extends StatelessWidget {
                 final u = nav.request.url?.toString() ?? '';
                 if (!u.startsWith('http')) return NavigationActionPolicy.CANCEL;
                 if (nav.isForMainFrame) {
-                  final initHost = Uri.tryParse(selectedUrl)?.host.replaceFirst('www.', '') ?? '';
-                  final targetHost = Uri.tryParse(u)?.host.replaceFirst('www.', '') ?? '';
-                  if (initHost.isNotEmpty && targetHost.isNotEmpty && targetHost != initHost) {
+                  final initHost = Uri.tryParse(selectedUrl)
+                          ?.host
+                          .replaceFirst('www.', '') ??
+                      '';
+                  final targetHost =
+                      Uri.tryParse(u)?.host.replaceFirst('www.', '') ?? '';
+                  if (initHost.isNotEmpty &&
+                      targetHost.isNotEmpty &&
+                      targetHost != initHost) {
                     final p = Uri.tryParse(u)?.path ?? '';
-                    final isEmbedPath = p.startsWith('/e/') || p.startsWith('/d/') || p.startsWith('/embed');
+                    final isEmbedPath = p.startsWith('/e/') ||
+                        p.startsWith('/d/') ||
+                        p.startsWith('/embed');
                     if (!isEmbedPath) return NavigationActionPolicy.CANCEL;
                   }
                 }
@@ -229,13 +287,37 @@ class PlayerView extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
                     children: [
-                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.of(context).pop()),
-                      Expanded(child: Text('${state.selectedSource?.host ?? "Odtwarzacz"} • ${state.selectedSource?.quality ?? ""} ${state.selectedSource?.lang ?? ""}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                      if (state.videoSources != null && state.videoSources!.length > 1)
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      Expanded(
+                        child: Text(
+                          '${state.selectedSource?.host ?? "Odtwarzacz"} • ${state.selectedSource?.quality ?? ""} ${state.selectedSource?.lang ?? ""}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (state.videoSources != null &&
+                          state.videoSources!.length > 1)
                         PopupMenuButton<VideoSource>(
                           icon: const Icon(Icons.settings, color: Colors.white),
-                          onSelected: (source) => context.read<PlayerBloc>().add(ChangeVideoSource(source: source)),
-                          itemBuilder: (context) => state.videoSources!.map((source) => PopupMenuItem<VideoSource>(value: source, child: Text('${source.host}: ${source.quality} - ${source.lang}'))).toList(),
+                          onSelected: (source) => context
+                              .read<PlayerBloc>()
+                              .add(ChangeVideoSource(source: source)),
+                          itemBuilder: (context) => state.videoSources!
+                              .map(
+                                (source) => PopupMenuItem<VideoSource>(
+                                  value: source,
+                                  child: Text(
+                                      '${source.host}: ${source.quality} - ${source.lang}'),
+                                ),
+                              )
+                              .toList(),
                         ),
                     ],
                   ),
@@ -286,15 +368,30 @@ class PlayerView extends StatelessWidget {
               ignoring: !state.isOverlayVisible,
               child: AnimatedOpacity(
                 opacity: state.isOverlayVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 300),
-                child: Stack(
-                  children: [
-                    _buildTopBar(context),
-                    _buildCenterPlayButton(state, bloc),
-                    _buildBrightnessControl(context),
-                    _buildIconsList(state, bloc),
-                    _buildBottomBar(context, state, bloc),
-                  ],
+                duration: const Duration(milliseconds: 250),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: [0.0, 0.25, 0.72, 1.0],
+                      colors: [
+                        Color(0xB3000000),
+                        Color(0x33000000),
+                        Color(0x33000000),
+                        Color(0xCC000000),
+                      ],
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      _buildTopBar(context),
+                      _buildCenterControls(state, bloc),
+                      _buildBrightnessControl(context, bloc),
+                      _buildIconsList(state, bloc),
+                      _buildBottomBar(context, state, bloc),
+                    ],
+                  ),
                 ),
               ),
             )
@@ -308,16 +405,23 @@ class PlayerView extends StatelessWidget {
     return Center(
       child: Transform(
         transform: Matrix4.translationValues(
-            state.seekDirection == SeekDirection.forward ? 100 : -100, 0, 0),
+            state.seekDirection == SeekDirection.forward ? 120 : -120, 0, 0),
         child: AnimatedOpacity(
           opacity: state.isSeeking ? 1 : 0,
-          duration: const Duration(milliseconds: 300),
-          child: Icon(
-            state.seekDirection == SeekDirection.forward
-                ? Icons.fast_forward
-                : Icons.fast_rewind,
-            size: 52,
-            color: Colors.white,
+          duration: const Duration(milliseconds: 220),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: Colors.black54,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              state.seekDirection == SeekDirection.forward
+                  ? Icons.forward_10
+                  : Icons.replay_10,
+              size: 48,
+              color: Colors.white,
+            ),
           ),
         ),
       ),
@@ -332,12 +436,12 @@ class PlayerView extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircularProgressIndicator(color: Colors.white),
+          const CircularProgressIndicator(color: _kNetflixRed, strokeWidth: 3.5),
           if (state.displayState.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
               state.displayState,
-              style: const TextStyle(color: Colors.white, fontSize: 16),
+              style: const TextStyle(color: Colors.white, fontSize: 15),
             ),
           ]
         ],
@@ -398,57 +502,90 @@ class PlayerView extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return OutlinedButton.icon(
+    return TextButton.icon(
       onPressed: () async {
-        // disable screen rotation in deactivate method
-        context.pushReplacementNamed('player',
-            extra: movie, queryParameters: queryParameters);
+        context.pushReplacementNamed(
+          'player',
+          extra: movie,
+          queryParameters: queryParameters,
+        );
       },
-      icon: const Text('Następny odcinek'),
-      label: const Icon(Icons.skip_next),
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.white12,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      icon: const Icon(Icons.skip_next, color: Colors.white, size: 20),
+      label: const Text(
+        'Następny odcinek',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+      ),
     );
   }
 
-  Widget _buildBrightnessControl(BuildContext context) {
+  Widget _buildBrightnessControl(BuildContext context, PlayerBloc bloc) {
     return Positioned(
-      left: 18,
-      top: -10,
-      height: MediaQuery.of(context).size.height,
-      child: FutureBuilder<double>(
-        future: ScreenBrightness.instance.application,
-        builder: (context, snapshot) {
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              RotatedBox(
-                quarterTurns: -1,
+      left: 16,
+      top: 56,
+      bottom: 64,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _getBrightnessIcon(_brightness),
+            color: Colors.white,
+            size: 20,
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 150,
+            child: RotatedBox(
+              quarterTurns: -1,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 4.0,
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white30,
+                  thumbColor: Colors.white,
+                  overlayColor: Colors.white24,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 7.0),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 14.0),
+                ),
                 child: Slider(
-                  value: snapshot.data ?? 0,
-                  min: 0,
-                  max: 1,
+                  value: _brightness.clamp(0.0, 1.0),
+                  min: 0.0,
+                  max: 1.0,
+                  onChangeStart: (_) {
+                    bloc.add(const ShowControls());
+                  },
                   onChanged: (value) {
+                    setState(() {
+                      _brightness = value;
+                    });
+                    bloc.add(const ShowControls());
                     ScreenBrightness.instance
                         .setApplicationScreenBrightness(value);
                   },
                 ),
               ),
-              Icon(_getBrightnessIcon(snapshot.data ?? 0), color: Colors.white),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
 
   IconData _getBrightnessIcon(final double brightness) {
-    if (brightness >= 0.875) return Icons.brightness_7;
-    if (brightness >= 0.75) return Icons.brightness_6;
-    if (brightness >= 0.625) return Icons.brightness_5;
-    if (brightness >= 0.5) return Icons.brightness_4;
-    if (brightness >= 0.375) return Icons.brightness_1;
-    if (brightness >= 0.25) return Icons.brightness_2;
-    if (brightness >= 0.125) return Icons.brightness_3;
-    return Icons.brightness_3;
+    if (brightness >= 0.75) return Icons.brightness_high;
+    if (brightness >= 0.35) return Icons.brightness_medium;
+    return Icons.brightness_low;
   }
 
   Widget _buildTopBar(BuildContext context) {
@@ -462,31 +599,34 @@ class PlayerView extends StatelessWidget {
       final seasonIndex = playerScreen.seasonIndex!;
       final episodeIndex = playerScreen.episodeIndex!;
       final episode = movie.seasons![seasonIndex].episodes[episodeIndex];
-      title = '${movie.title} - ${episode.title}';
+      title =
+          '${movie.title}  •  S${seasonIndex + 1}:E${episode.number} ${episode.title}';
     }
 
     return Align(
       alignment: Alignment.topCenter,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         width: double.infinity,
-        height: 48,
+        height: 52,
         child: Stack(
+          alignment: Alignment.center,
           children: [
             Align(
               alignment: Alignment.centerLeft,
               child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ),
-            Center(
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 140),
               child: Text(
                 title,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w800,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -495,24 +635,50 @@ class PlayerView extends StatelessWidget {
             ),
             if (movie.isSeries)
               Align(
-                  alignment: Alignment.centerRight,
-                  child: _buildNextEpisodeButton(context)),
+                alignment: Alignment.centerRight,
+                child: _buildNextEpisodeButton(context),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCenterPlayButton(PlayerState state, PlayerBloc bloc) {
+  Widget _buildCenterControls(PlayerState state, PlayerBloc bloc) {
+    if (state.isBuffering) return const SizedBox.shrink();
+
     return Center(
-      child: state.isBuffering
-          ? const SizedBox()
-          : IconButton(
-              icon: Icon(state.isPlaying ? Icons.pause : Icons.play_arrow),
-              iconSize: 72,
-              color: Colors.white,
-              onPressed: () => bloc.add(const PlayPause()),
-            ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.replay_10),
+            iconSize: 48,
+            color: Colors.white,
+            onPressed: () {
+              bloc.add(const ShowControls());
+              bloc.add(const SeekWithDirection(isForward: false));
+            },
+          ),
+          const SizedBox(width: 42),
+          IconButton(
+            icon: Icon(state.isPlaying ? Icons.pause : Icons.play_arrow),
+            iconSize: 72,
+            color: Colors.white,
+            onPressed: () => bloc.add(const PlayPause()),
+          ),
+          const SizedBox(width: 42),
+          IconButton(
+            icon: const Icon(Icons.forward_10),
+            iconSize: 48,
+            color: Colors.white,
+            onPressed: () {
+              bloc.add(const ShowControls());
+              bloc.add(const SeekWithDirection(isForward: true));
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -520,14 +686,14 @@ class PlayerView extends StatelessWidget {
     return Align(
       alignment: Alignment.centerRight,
       child: Padding(
-        padding: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.only(right: 12),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const SizedBox(width: 16),
             if (state.videoSources != null && state.videoSources!.length > 1)
               PopupMenuButton<VideoSource>(
-                icon: const Icon(Icons.settings, color: Colors.white),
+                icon: const Icon(Icons.subtitles_outlined, color: Colors.white),
+                tooltip: 'Źródła wideo i jakość',
                 onSelected: (source) =>
                     bloc.add(ChangeVideoSource(source: source)),
                 itemBuilder: (context) => state.videoSources!
@@ -547,18 +713,20 @@ class PlayerView extends StatelessWidget {
                     .toList(),
               ),
             IconButton(
-                icon: Icon(
-                    state.isImersive ? Icons.fullscreen_exit : Icons.fullscreen,
-                    color: Colors.white),
-                onPressed: () {
-                  bloc.add(const ToggleImmersiveMode());
-                }),
+              icon: Icon(
+                state.isImersive ? Icons.fullscreen_exit : Icons.fullscreen,
+                color: Colors.white,
+              ),
+              onPressed: () {
+                bloc.add(const ToggleImmersiveMode());
+              },
+            ),
             CastButton(
               castFramework: state.castFramework,
-              activeColor: Colors.white,
+              activeColor: _kNetflixRed,
               color: Colors.white,
-              disabledColor: Colors.white,
-            )
+              disabledColor: Colors.white54,
+            ),
           ],
         ),
       ),
@@ -567,43 +735,98 @@ class PlayerView extends StatelessWidget {
 
   Widget _buildBottomBar(
       BuildContext context, PlayerState state, PlayerBloc bloc) {
-    final double progress = state.duration.inMilliseconds > 0
-        ? state.position.inMilliseconds / state.duration.inMilliseconds
+    final totalMs = state.duration.inMilliseconds;
+    final double liveProgress = totalMs > 0
+        ? (state.position.inMilliseconds / totalMs).clamp(0.0, 1.0)
         : 0.0;
+    final double effectiveProgress =
+        (_draggingProgress ?? liveProgress).clamp(0.0, 1.0);
+    final Duration displayPosition = _draggingProgress != null && totalMs > 0
+        ? Duration(milliseconds: (_draggingProgress! * totalMs).round())
+        : state.position;
 
     return Align(
       alignment: Alignment.bottomCenter,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 56),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         width: double.infinity,
-        height: 48,
+        height: 52,
         child: Row(
           children: [
-            Text(
-              _formatDuration(state.position),
-              style: const TextStyle(color: Colors.white),
-            ),
-            Expanded(
-              child: SliderTheme(
-                data: const SliderThemeData(
-                  trackHeight: 2,
-                  thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                ),
-                child: Slider(
-                  value: progress.clamp(0.0, 1.0),
-                  onChanged: (value) => bloc.add(SeekTo(position: value)),
-                  activeColor: Theme.of(context).colorScheme.primary,
-                  inactiveColor: Colors.white,
+            SizedBox(
+              width: 64,
+              child: Text(
+                _formatDuration(displayPosition),
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            AnimatedOpacity(
-              opacity: state.duration == Duration.zero ? 0 : 1,
-              duration: const Duration(milliseconds: 300),
-              child: Text(
-                _formatDuration(state.duration),
-                style: const TextStyle(color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: _draggingProgress != null ? 6.0 : 4.0,
+                  activeTrackColor: _kNetflixRed,
+                  inactiveTrackColor: Colors.white30,
+                  thumbColor: _kNetflixRed,
+                  overlayColor: _kNetflixRed.withAlpha(65),
+                  thumbShape: RoundSliderThumbShape(
+                    enabledThumbRadius: _draggingProgress != null ? 9.5 : 7.0,
+                  ),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 18.0),
+                ),
+                child: Slider(
+                  value: effectiveProgress,
+                  min: 0.0,
+                  max: 1.0,
+                  onChangeStart: (value) {
+                    _seekReleaseTimer?.cancel();
+                    setState(() {
+                      _draggingProgress = value;
+                    });
+                    bloc.add(const ShowControls());
+                  },
+                  onChanged: (value) {
+                    setState(() {
+                      _draggingProgress = value;
+                    });
+                    bloc.add(const ShowControls());
+                  },
+                  onChangeEnd: (value) {
+                    bloc.add(SeekTo(position: value));
+                    _seekReleaseTimer?.cancel();
+                    _seekReleaseTimer =
+                        Timer(const Duration(milliseconds: 350), () {
+                      if (mounted) {
+                        setState(() {
+                          _draggingProgress = null;
+                        });
+                      }
+                    });
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 64,
+              child: AnimatedOpacity(
+                opacity: state.duration == Duration.zero ? 0 : 1,
+                duration: const Duration(milliseconds: 250),
+                child: Text(
+                  _formatDuration(state.duration),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ],
