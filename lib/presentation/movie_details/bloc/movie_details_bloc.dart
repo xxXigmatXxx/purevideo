@@ -51,13 +51,13 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
       final results = <MovieModel>[];
 
-      // Fetch search results from all logged-in services in parallel instead of sequentially
       final loggedServiceEntries = _searchRepositories.entries
           .where((entry) => _authRepositories[entry.key]?.getAccount() != null)
           .toList();
 
       if (loggedServiceEntries.isNotEmpty) {
-        final searchFutures = loggedServiceEntries.map((loggedServiceEntry) async {
+        final searchFutures =
+            loggedServiceEntries.map((loggedServiceEntry) async {
           final q1 = event.movie.title.trim().isNotEmpty
               ? event.movie.title.trim()
               : event.movie.originalTitle.trim();
@@ -81,7 +81,15 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           _mergeService.addFromServiceTemp(result, results);
         }
 
-        if (results.isEmpty) { emit(state.copyWith(errorMessage: 'Nie znaleziono wideo dla: ' + (event.movie.title.isNotEmpty ? event.movie.title : event.movie.originalTitle) + '. Upewnij się, że jesteś zalogowany w Ustawieniach.', isLoaded: true)); return; } add(LoadMovieDetails(movie: results.first));
+        if (results.isEmpty) {
+          emit(state.copyWith(
+            errorMessage:
+                'Nie znaleziono wideo dla: ${event.movie.title.isNotEmpty ? event.movie.title : event.movie.originalTitle}.',
+            isLoaded: true,
+          ));
+          return;
+        }
+        add(LoadMovieDetails(movie: results.first));
       } else {
         emit(state.copyWith(
           errorMessage: 'Nie jesteś zalogowany do żadnego serwisu',
@@ -99,7 +107,6 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       LoadMovieDetails event, Emitter<MovieDetailsState> emit) async {
     try {
       final services = <ServiceMovieDetailsModel>[];
-
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
       for (final serivceMovie in event.movie.services) {
@@ -126,25 +133,41 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
         detailsFutures.add(() async {
           try {
-            return await movieRepository.getMovieDetails(serivceMovie.url);
+            final details =
+                await movieRepository.getMovieDetails(serivceMovie.url);
+            // Preserve valid title and poster from MovieModel if details page had empty/placeholder values
+            final fixedTitle = (details.title.trim().isEmpty ||
+                    details.title.trim() == 'Brak tytułu')
+                ? serivceMovie.title
+                : details.title;
+            final fixedImg = details.imageUrl.trim().isEmpty
+                ? serivceMovie.imageUrl
+                : details.imageUrl;
+            return details.copyWith(
+              title: fixedTitle,
+              imageUrl: fixedImg,
+            );
           } catch (e) {
-            debugPrint('Error loading details from ${serivceMovie.service}: $e');
+            debugPrint(
+                'Error loading details from ${serivceMovie.service}: $e');
             if (event.movie.services.length == 1) rethrow;
             return null;
           }
         }());
       }
 
-      services.addAll(
-          (await Future.wait(detailsFutures)).whereType<ServiceMovieDetailsModel>());
+      services.addAll((await Future.wait(detailsFutures))
+          .whereType<ServiceMovieDetailsModel>());
       if (services.isEmpty) {
         throw Exception('Nie udało się pobrać szczegółów z żadnego serwisu');
       }
 
       final MovieDetailsModel movie = MovieDetailsModel(services: services);
 
-      FirebaseAnalytics.instance
-          .logSelectContent(contentType: 'video', itemId: movie.title);
+      try {
+        FirebaseAnalytics.instance
+            .logSelectContent(contentType: 'video', itemId: movie.title);
+      } catch (_) {}
 
       final watched = _watchedService.getByMovie(movie);
 
@@ -152,10 +175,12 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
       if (movie.isSeries) {
         final lastWatchedSeason = watched?.lastWatchedEpisode?.season;
-        final selectedSeasonIndex = lastWatchedSeason != null
-            ? movie.seasons
-                ?.indexWhere((s) => s.number == lastWatchedSeason.number)
-            : 0;
+        int selectedSeasonIndex = 0;
+        if (lastWatchedSeason != null && movie.seasons != null) {
+          final idx = movie.seasons!
+              .indexWhere((s) => s.number == lastWatchedSeason.number);
+          if (idx >= 0) selectedSeasonIndex = idx;
+        }
 
         emit(state.copyWith(
           movie: movie,
@@ -180,8 +205,9 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       ScrapeVideoUrls event, Emitter<MovieDetailsState> emit) async {
     try {
       if (!event.movie.isSeries) {
-        final updatedMovie =
-            await _videoSourceRepository.scrapeVideoUrls(event.movie).timeout(const Duration(seconds: 28), onTimeout: () => event.movie);
+        final updatedMovie = await _videoSourceRepository
+            .scrapeVideoUrls(event.movie)
+            .timeout(const Duration(seconds: 28), onTimeout: () => event.movie);
         emit(state.copyWith(movie: updatedMovie, isLoaded: true));
       }
     } catch (e) {

@@ -13,15 +13,18 @@ class InitializePlayer extends PlayerEvent {
   final MovieDetailsModel movie;
   final int? seasonIndex;
   final int? episodeIndex;
+  final int? initialSourceIndex;
 
   const InitializePlayer({
     required this.movie,
     this.seasonIndex,
     this.episodeIndex,
+    this.initialSourceIndex,
   });
 
   @override
-  List<Object?> get props => [movie, seasonIndex, episodeIndex];
+  List<Object?> get props =>
+      [movie, seasonIndex, episodeIndex, initialSourceIndex];
 }
 
 class LoadVideoSources extends PlayerEvent {

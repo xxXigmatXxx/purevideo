@@ -20,12 +20,14 @@ class PlayerScreen extends StatefulWidget {
   final MovieDetailsModel movie;
   final int? seasonIndex;
   final int? episodeIndex;
+  final int? initialSourceIndex;
 
   const PlayerScreen({
     super.key,
     required this.movie,
     this.seasonIndex,
     this.episodeIndex,
+    this.initialSourceIndex,
   });
 
   @override
@@ -37,8 +39,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void initState() {
-    _playerBloc = PlayerBloc();
     super.initState();
+    _playerBloc = PlayerBloc()
+      ..add(InitializePlayer(
+        movie: widget.movie,
+        seasonIndex: widget.seasonIndex,
+        episodeIndex: widget.episodeIndex,
+        initialSourceIndex: widget.initialSourceIndex,
+      ));
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -71,12 +79,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocProvider.value(
-      value: _playerBloc
-        ..add(InitializePlayer(
-          movie: widget.movie,
-          seasonIndex: widget.seasonIndex,
-          episodeIndex: widget.episodeIndex,
-        )),
+      value: _playerBloc,
       child: const PlayerView(),
     );
   }
@@ -115,6 +118,221 @@ class _PlayerViewState extends State<PlayerView> {
   void dispose() {
     _seekReleaseTimer?.cancel();
     super.dispose();
+  }
+
+  Widget _buildBadge(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: fg,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  void _showSourcesBottomSheet(
+      BuildContext context, PlayerState state, PlayerBloc bloc) {
+    final sources = state.videoSources ?? const <VideoSource>[];
+    if (sources.isEmpty) return;
+
+    bloc.add(const ShowControls());
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141414),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.82,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 12, 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.dns_rounded,
+                          color: _kNetflixRed, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Wybierz źródło wideo (${sources.length})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Colors.white12),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.all(14),
+                    itemCount: sources.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, idx) {
+                      final source = sources[idx];
+                      final isSelected = source == state.selectedSource ||
+                          source.url == state.selectedSource?.url;
+                      final isWeb = source.host.contains('(Web)');
+                      final cleanHost =
+                          source.host.replaceAll('(Web)', '').trim();
+                      final lang = source.lang.trim().isEmpty
+                          ? 'PL'
+                          : source.lang.trim();
+                      final qual = source.quality.trim().isEmpty
+                          ? 'HD'
+                          : source.quality.trim();
+
+                      return Material(
+                        color: isSelected
+                            ? const Color(0xFF281214)
+                            : const Color(0xFF1F1F1F),
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.of(ctx).pop();
+                            bloc.add(ChangeVideoSource(source: source));
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color:
+                                    isSelected ? _kNetflixRed : Colors.white12,
+                                width: isSelected ? 1.6 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: isWeb
+                                        ? const Color(0xFF1E3A5F)
+                                        : _kNetflixRed.withAlpha(45),
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    isWeb
+                                        ? Icons.language_rounded
+                                        : Icons.bolt_rounded,
+                                    color: isWeb
+                                        ? const Color(0xFF64B5F6)
+                                        : _kNetflixRed,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              'Link #${idx + 1} • $cleanHost',
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14.5,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isSelected) ...[
+                                            const SizedBox(width: 8),
+                                            _buildBadge(
+                                              'Aktywne',
+                                              _kNetflixRed,
+                                              Colors.white,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 5),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 4,
+                                        children: [
+                                          _buildBadge(
+                                            lang,
+                                            Colors.white12,
+                                            Colors.white,
+                                          ),
+                                          _buildBadge(
+                                            qual,
+                                            const Color(0xFF263238),
+                                            const Color(0xFF81C784),
+                                          ),
+                                          _buildBadge(
+                                            isWeb
+                                                ? 'Odtwarzacz Web'
+                                                : 'Odtwarzacz natywny',
+                                            isWeb
+                                                ? const Color(0xFF1A2736)
+                                                : const Color(0xFF1B3320),
+                                            isWeb
+                                                ? const Color(0xFF90CAF9)
+                                                : const Color(0xFF69F0AE),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.play_circle_fill_rounded,
+                                  color: isSelected
+                                      ? _kNetflixRed
+                                      : Colors.white70,
+                                  size: 28,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -183,6 +401,7 @@ class _PlayerViewState extends State<PlayerView> {
   }
 
   Widget _buildPlayerView(BuildContext context, PlayerState state) {
+    final bloc = context.read<PlayerBloc>();
     final selectedUrl = state.selectedSource?.url ?? '';
     final isWeb = (state.selectedSource?.host ?? '').contains('(Web)');
     if (selectedUrl.isNotEmpty && isWeb) {
@@ -304,20 +523,28 @@ class _PlayerViewState extends State<PlayerView> {
                       ),
                       if (state.videoSources != null &&
                           state.videoSources!.length > 1)
-                        PopupMenuButton<VideoSource>(
-                          icon: const Icon(Icons.settings, color: Colors.white),
-                          onSelected: (source) => context
-                              .read<PlayerBloc>()
-                              .add(ChangeVideoSource(source: source)),
-                          itemBuilder: (context) => state.videoSources!
-                              .map(
-                                (source) => PopupMenuItem<VideoSource>(
-                                  value: source,
-                                  child: Text(
-                                      '${source.host}: ${source.quality} - ${source.lang}'),
-                                ),
-                              )
-                              .toList(),
+                        TextButton.icon(
+                          onPressed: () =>
+                              _showSourcesBottomSheet(context, state, bloc),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: _kNetflixRed,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(Icons.dns_rounded,
+                              color: Colors.white, size: 17),
+                          label: Text(
+                            'Źródła (${state.videoSources!.length})',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12.5,
+                            ),
+                          ),
                         ),
                     ],
                   ),
@@ -328,7 +555,6 @@ class _PlayerViewState extends State<PlayerView> {
         ),
       );
     }
-    final bloc = context.read<PlayerBloc>();
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -388,7 +614,7 @@ class _PlayerViewState extends State<PlayerView> {
                       _buildTopBar(context),
                       _buildCenterControls(state, bloc),
                       _buildBrightnessControl(context, bloc),
-                      _buildIconsList(state, bloc),
+                      _buildIconsList(context, state, bloc),
                       _buildBottomBar(context, state, bloc),
                     ],
                   ),
@@ -682,7 +908,8 @@ class _PlayerViewState extends State<PlayerView> {
     );
   }
 
-  Widget _buildIconsList(PlayerState state, PlayerBloc bloc) {
+  Widget _buildIconsList(
+      BuildContext context, PlayerState state, PlayerBloc bloc) {
     return Align(
       alignment: Alignment.centerRight,
       child: Padding(
@@ -691,26 +918,11 @@ class _PlayerViewState extends State<PlayerView> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (state.videoSources != null && state.videoSources!.length > 1)
-              PopupMenuButton<VideoSource>(
-                icon: const Icon(Icons.subtitles_outlined, color: Colors.white),
-                tooltip: 'Źródła wideo i jakość',
-                onSelected: (source) =>
-                    bloc.add(ChangeVideoSource(source: source)),
-                itemBuilder: (context) => state.videoSources!
-                    .map(
-                      (source) => PopupMenuItem<VideoSource>(
-                        value: source,
-                        child: Text(
-                          '${source.host}: ${source.quality} - ${source.lang}',
-                          style: TextStyle(
-                            fontWeight: source == state.selectedSource
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
+              IconButton(
+                icon: const Icon(Icons.dns_rounded, color: Colors.white),
+                tooltip: 'Wybierz źródło wideo',
+                onPressed: () =>
+                    _showSourcesBottomSheet(context, state, bloc),
               ),
             IconButton(
               icon: Icon(
@@ -829,6 +1041,31 @@ class _PlayerViewState extends State<PlayerView> {
                 ),
               ),
             ),
+            if (state.videoSources != null && state.videoSources!.length > 1) ...[
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => _showSourcesBottomSheet(context, state, bloc),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white12,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                icon:
+                    const Icon(Icons.dns_rounded, color: _kNetflixRed, size: 17),
+                label: Text(
+                  'Źródła (${state.videoSources!.length})',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -1,15 +1,19 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:purevideo/core/services/merg_service.dart';
+import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
+import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/repositories/auth_repository.dart';
-import 'package:purevideo/data/repositories/filmweb/filmweb_info_repository.dart';
+import 'package:purevideo/data/repositories/search_repository.dart';
 import 'package:purevideo/presentation/search/bloc/search_event.dart';
 import 'package:purevideo/presentation/search/bloc/search_state.dart';
 import 'package:purevideo/di/injection_container.dart';
 
 class SearchBloc extends Bloc<SearchEvent, SearchState> {
   final Map<SupportedService, AuthRepository> _authRepositories = getIt();
-  final FilmwebInfoRepository _filmwebInfoRepository = getIt();
+  final Map<SupportedService, SearchRepository> _searchRepositories = getIt();
+  final SettingsService _settingsService = getIt<SettingsService>();
 
   SearchBloc() : super(const SearchInitial()) {
     on<SearchRequested>(_onSearchRequested);
@@ -20,50 +24,48 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     SearchRequested event,
     Emitter<SearchState> emit,
   ) async {
+    final q = event.query.trim();
+    if (q.isEmpty) {
+      emit(const SearchInitial());
+      return;
+    }
+
     emit(const SearchLoading());
 
     try {
-      bool hasLoggedInUser = false;
-      for (final entry in _authRepositories.entries) {
-        final account = entry.value.getAccount();
-        if (account != null) {
-          hasLoggedInUser = true;
-          break;
-        }
-      }
+      final loggedServiceEntries = _searchRepositories.entries
+          .where((entry) => _authRepositories[entry.key]?.getAccount() != null)
+          .toList();
 
-      if (!hasLoggedInUser) {
-        emit(const SearchError('Zaloguj się aby zobaczyć filmy'));
+      if (loggedServiceEntries.isEmpty) {
+        emit(const SearchError('Zaloguj się w Ustawieniach aby wyszukiwać filmy'));
         return;
       }
 
-      final results = await _filmwebInfoRepository.searchMovie(event.query);
+      final merge = getIt<MergeService>();
+      final results = <MovieModel>[];
 
-      // final merge = getIt<MergeService>();
+      final searchFutures = loggedServiceEntries.map((entry) async {
+        try {
+          return await entry.value
+              .searchMovies(q)
+              .timeout(const Duration(seconds: 18));
+        } catch (e) {
+          debugPrint('Search error on ${entry.key}: $e');
+          return <ServiceMovieModel>[];
+        }
+      }).toList();
 
-      // final results = <MovieModel>[];
-
-      // Fetch search results from all logged-in services in parallel instead of sequentially
-      // final loggedServiceEntries = _searchRepositories.entries
-      //     .where((entry) => _authRepositories[entry.key]?.getAccount() != null)
-      //     .toList();
-
-      // if (loggedServiceEntries.isNotEmpty) {
-      //   final searchFutures = loggedServiceEntries
-      //       .map((entry) => entry.value.searchMovies(event.query))
-      //       .toList();
-
-      // Wait for all search calls to complete in parallel, but continue even if one fails
-      // final searchResults = await Future.wait(
-      //   searchFutures,
-      //   eagerError: false,
-      // ).then((results) => results
-      //     .whereType<List<ServiceMovieModel>>()
-      //     .fold<List<ServiceMovieModel>>([], (acc, list) => [...acc, ...list]));
-
-      // Add all fetched results to merge service
-      // await merge.addFromServiceTemp(searchResults, results);
-      // }
+      final searchLists = await Future.wait(searchFutures, eagerError: false);
+      for (final list in searchLists) {
+        final clean = list
+            .where((s) =>
+                !_settingsService.isUrlLinkless(s.url) &&
+                s.url.trim().isNotEmpty &&
+                s.title.trim().isNotEmpty)
+            .toList();
+        await merge.addFromServiceTemp(clean, results);
+      }
 
       emit(SearchLoaded(results));
     } catch (e) {

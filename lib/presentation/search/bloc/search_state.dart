@@ -1,9 +1,9 @@
-import 'package:purevideo/data/models/filmweb_model.dart';
+import 'package:purevideo/data/models/movie_model.dart';
 
 abstract class SearchState {
   const SearchState();
 
-  List<FilmwebPreviewModel> get results => [];
+  List<MovieModel> get results => [];
 }
 
 class SearchInitial extends SearchState {
@@ -15,12 +15,12 @@ class SearchLoading extends SearchState {
 }
 
 class SearchLoaded extends SearchState {
-  final List<FilmwebPreviewModel> _results;
+  final List<MovieModel> _results;
 
   const SearchLoaded(this._results);
 
   @override
-  List<FilmwebPreviewModel> get results => _results;
+  List<MovieModel> get results => _results;
 }
 
 class SearchError extends SearchState {

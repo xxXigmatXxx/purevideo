@@ -41,7 +41,8 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
             onPressed: () => context.go('/search'),
           ),
           IconButton(
-            icon: const Icon(Icons.manage_accounts_outlined, color: Colors.white),
+            icon:
+                const Icon(Icons.manage_accounts_outlined, color: Colors.white),
             onPressed: () => context.pushNamed('accounts'),
           ),
         ],
@@ -115,8 +116,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                               width: 114,
                               child: GestureDetector(
                                 onTap: () => context.pushNamed(
-                                  'movie_details',
-                                  pathParameters: {'title': m.title},
+                                  'movie_details_plain',
                                   extra: m,
                                 ),
                                 child: ClipRRect(
@@ -184,12 +184,14 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                             final int denom =
                                 item.movie.isSeries ? 2700 : 5700;
                             final double progress =
-                                (watchedSec / denom).clamp(0.06, 0.96);
+                                (watchedSec / denom).clamp(0.08, 0.96);
+                            final String badge = lastEp != null
+                                ? 'S${lastEp.season.number}:E${lastEp.watchedEpisode.episode.number}'
+                                : '${(watchedSec ~/ 60) > 0 ? (watchedSec ~/ 60) : 1} min';
 
                             return GestureDetector(
                               onTap: () => context.pushNamed(
-                                'movie_details',
-                                pathParameters: {'title': movie.title},
+                                'movie_details_plain',
                                 extra: movie,
                               ),
                               child: ClipRRect(
@@ -203,8 +205,69 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => Container(
                                         color: const Color(0xFF1F1F1F),
-                                        child: const Icon(Icons.movie,
-                                            color: _kNetflixRed),
+                                        padding: const EdgeInsets.all(8),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          movie.title,
+                                          maxLines: 3,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 4,
+                                      right: 4,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _watchedService
+                                              .removeMovie(item.movie);
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black87,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.close,
+                                            color: Colors.white70,
+                                            size: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: 4,
+                                      child: Container(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            6, 16, 6, 4),
+                                        decoration: const BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.transparent,
+                                              Colors.black87,
+                                            ],
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${movie.title} ($badge)',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                     Positioned(

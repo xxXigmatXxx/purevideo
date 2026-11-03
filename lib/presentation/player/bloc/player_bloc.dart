@@ -45,6 +45,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   MovieDetailsModel? _movie;
   int? _seasonIndex;
   int? _episodeIndex;
+  int? _initialSourceIndex;
+  int _lastSavedSecond = -1;
 
   PlayerBloc()
       : super(PlayerState(
@@ -71,13 +73,37 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     on<CastVideo>(_onCastVideo);
   }
 
+  void _saveWatchedProgress([int? overrideSeconds]) {
+    if (_movie == null) return;
+    try {
+      final sec = overrideSeconds ?? state.position.inSeconds;
+      if (_movie!.isSeries &&
+          _seasonIndex != null &&
+          _episodeIndex != null &&
+          _movie!.seasons != null &&
+          _seasonIndex! < _movie!.seasons!.length &&
+          _episodeIndex! < _movie!.seasons![_seasonIndex!].episodes.length) {
+        watchedService.watchEpisode(
+          _movie!,
+          _movie!.seasons![_seasonIndex!],
+          _movie!.seasons![_seasonIndex!].episodes[_episodeIndex!],
+          sec,
+        );
+      } else {
+        watchedService.watchMovie(_movie!, sec);
+      }
+    } catch (e) {
+      debugPrint('Error saving watched progress: $e');
+    }
+  }
+
   @override
   Future<void> close() {
+    _saveWatchedProgress();
     _disposeMediaKit();
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
-    // Remove cast state listener if it was added
     if (_castStateListener != null) {
       try {
         state.castFramework.castContext.state
@@ -113,33 +139,19 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   void _disposeMediaKit() {
     try {
       _positionSubscription.cancel();
-    } catch (e) {
-      debugPrint('Error cancelling position subscription: $e');
-    }
-
+    } catch (_) {}
     try {
       _durationSubscription.cancel();
-    } catch (e) {
-      debugPrint('Error cancelling duration subscription: $e');
-    }
-
+    } catch (_) {}
     try {
       _playingSubscription.cancel();
-    } catch (e) {
-      debugPrint('Error cancelling playing subscription: $e');
-    }
-
+    } catch (_) {}
     try {
       _bufferingSubscription.cancel();
-    } catch (e) {
-      debugPrint('Error cancelling buffering subscription: $e');
-    }
-
+    } catch (_) {}
     try {
       _player.dispose();
-    } catch (e) {
-      debugPrint('Error disposing media player: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _onInitializePlayer(
@@ -149,6 +161,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _movie = event.movie;
     _seasonIndex = event.seasonIndex;
     _episodeIndex = event.episodeIndex;
+    _initialSourceIndex = event.initialSourceIndex;
 
     _initMediaKit();
 
@@ -167,25 +180,22 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       controlStyle: 2,
     );
 
-    await state.pipFramework.setup(options);
-
-    await state.pipFramework
-        .registerStateChangedObserver(PipStateChangedObserver(
-      onPipStateChanged: (pipState, error) {
-        switch (pipState) {
-          case PipState.pipStateStarted:
-            emit(state.copyWith(isOverlayVisible: false));
-            _hideControlsTimer?.cancel();
-            debugPrint('PiP started');
-            break;
-          case PipState.pipStateFailed:
-            debugPrint('PiP failed: $error');
-            break;
-          default:
-            break;
-        }
-      },
-    ));
+    try {
+      await state.pipFramework.setup(options);
+      await state.pipFramework
+          .registerStateChangedObserver(PipStateChangedObserver(
+        onPipStateChanged: (pipState, error) {
+          switch (pipState) {
+            case PipState.pipStateStarted:
+              emit(state.copyWith(isOverlayVisible: false));
+              _hideControlsTimer?.cancel();
+              break;
+            default:
+              break;
+          }
+        },
+      ));
+    } catch (_) {}
 
     emit(state.copyWith(
       isLoading: true,
@@ -213,21 +223,23 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         final episodes = <EpisodeModel>[];
         for (final service in _movie!.services) {
           final movieRepository = _movieRepositories[service.service];
-          if (movieRepository == null) {
+          if (movieRepository == null) continue;
+          if (service.seasons == null ||
+              _seasonIndex! >= service.seasons!.length) {
             continue;
           }
-
-          if (_seasonIndex! >= service.seasons!.length) continue;
-          final season = service.seasons?[_seasonIndex!];
-          if (season == null) continue;
+          final season = service.seasons![_seasonIndex!];
           if (_episodeIndex! >= season.episodes.length) continue;
           final episode = season.episodes[_episodeIndex!];
-          final episodeWithHosts =
-              await movieRepository.getEpisodeHosts(episode);
-          episodes.add(episodeWithHosts);
+          if (episode.videoUrls != null && episode.videoUrls!.isNotEmpty) {
+            episodes.add(episode);
+          } else {
+            final episodeWithHosts =
+                await movieRepository.getEpisodeHosts(episode);
+            episodes.add(episodeWithHosts);
+          }
         }
 
-        // this is dummy af but this system works better for movies than series
         final tempModel = MovieDetailsModel(
           services: [
             ServiceMovieDetailsModel(
@@ -237,7 +249,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
                 description: '',
                 imageUrl: '',
                 isSeries: true,
-                videoUrls: episodes.expand((e) => e.videoUrls!).toList()),
+                videoUrls:
+                    episodes.expand((e) => e.videoUrls ?? const []).toList()),
           ],
           filmwebInfo: _movie!.filmwebInfo,
         );
@@ -245,16 +258,24 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         movieDetails = await _videoSourceRepository.scrapeVideoUrls(tempModel);
       } else {
         movieDetails = _movie!;
-        if (movieDetails.directUrls == null || movieDetails.directUrls!.isEmpty) { movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!); }
+        if (movieDetails.directUrls == null ||
+            movieDetails.directUrls!.isEmpty) {
+          movieDetails = await _videoSourceRepository.scrapeVideoUrls(_movie!);
+        }
       }
 
       if (movieDetails.directUrls != null &&
           movieDetails.directUrls!.isNotEmpty) {
-        // TODO: better source selection logic
-        final selectedSource = movieDetails.directUrls!.first;
+        final sources = movieDetails.directUrls!;
+        final idx = (_initialSourceIndex != null &&
+                _initialSourceIndex! >= 0 &&
+                _initialSourceIndex! < sources.length)
+            ? _initialSourceIndex!
+            : 0;
+        final selectedSource = sources[idx];
 
         emit(state.copyWith(
-          videoSources: movieDetails.directUrls,
+          videoSources: sources,
           selectedSource: selectedSource,
           isLoading: false,
         ));
@@ -331,15 +352,43 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         watchedPosition = watchedMovie?.watchedTime;
       }
 
+      // Immediately record in "Ostatnio oglądane" when starting playback!
+      _saveWatchedProgress(watchedPosition ?? 0);
+
       debugPrint('[PlayerBloc] Opening media: ${event.source.url}');
-      Future.delayed(const Duration(seconds: 6), () { if (!isClosed && state.isBuffering) emit(state.copyWith(isBuffering: false, isPlaying: true, displayState: '')); }); if (event.source.host.contains('(Web)')) { await _player.stop(); emit(state.copyWith(isBuffering: false, isPlaying: true, selectedSource: event.source, displayState: '')); return; } await _player.open(
-        Media(event.source.url,
-            httpHeaders: headers,
-            start: Duration(seconds: watchedPosition ?? 0)),
+      Future.delayed(const Duration(seconds: 6), () {
+        if (!isClosed && state.isBuffering) {
+          emit(state.copyWith(
+            isBuffering: false,
+            isPlaying: true,
+            displayState: '',
+          ));
+        }
+      });
+
+      if (event.source.host.contains('(Web)')) {
+        await _player.stop();
+        emit(state.copyWith(
+          isBuffering: false,
+          isPlaying: true,
+          selectedSource: event.source,
+          displayState: '',
+        ));
+        return;
+      }
+
+      await _player.open(
+        Media(
+          event.source.url,
+          httpHeaders: headers,
+          start: Duration(seconds: watchedPosition ?? 0),
+        ),
         play: true,
       );
 
-      emit(state.copyWith(isBuffering: false, isPlaying: true,
+      emit(state.copyWith(
+        isBuffering: false,
+        isPlaying: true,
         selectedSource: event.source,
         displayState: '',
       ));
@@ -371,6 +420,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       milliseconds: (event.position * state.duration.inMilliseconds).round(),
     );
     _player.seek(position);
+    _saveWatchedProgress(position.inSeconds);
   }
 
   Future<void> _onSeekWithDirection(
@@ -401,6 +451,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     }
 
     _player.seek(Duration(seconds: newPositionSeconds));
+    _saveWatchedProgress(newPositionSeconds);
   }
 
   Future<void> _onChangeVideoSource(
@@ -451,6 +502,11 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     Emitter<PlayerState> emit,
   ) async {
     emit(state.copyWith(position: event.position));
+    final curSec = event.position.inSeconds;
+    if (curSec > 0 && (curSec - _lastSavedSecond).abs() >= 10) {
+      _lastSavedSecond = curSec;
+      _saveWatchedProgress(curSec);
+    }
     _updateNotification();
   }
 
@@ -484,10 +540,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     Emitter<PlayerState> emit,
   ) async {
     if (event.isBuffering) {
-      debugPrint('[PlayerBloc] Buffering started');
       emit(state.copyWith(isBuffering: true));
     } else {
-      debugPrint('[PlayerBloc] Buffering complete - playback ready');
       emit(state.copyWith(
         isBuffering: false,
         isPlaying: true,
@@ -514,45 +568,23 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
     try {
       _audioSession.setActive(false);
-    } catch (e) {
-      debugPrint('Error setting audio session inactive: $e');
-    }
+    } catch (_) {}
 
     try {
       _mediaService.audioHandler.playbackState.add(PlaybackState(
         playing: false,
       ));
-    } catch (e) {
-      debugPrint('Error updating playback state: $e');
-    }
+    } catch (_) {}
 
     try {
       state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
-    } catch (e) {
-      debugPrint('Error stopping cast: $e');
-    }
+    } catch (_) {}
 
-    if (_movie != null) {
-      try {
-        if (_movie!.isSeries) {
-          watchedService.watchEpisode(
-              _movie!,
-              _movie!.seasons![_seasonIndex!],
-              _movie!.seasons![_seasonIndex!].episodes[_episodeIndex!],
-              state.position.inSeconds);
-        } else {
-          watchedService.watchMovie(_movie!, state.position.inSeconds);
-        }
-      } catch (e) {
-        debugPrint('Error saving watched progress: $e');
-      }
-    }
+    _saveWatchedProgress();
 
     try {
       state.pipFramework.dispose();
-    } catch (e) {
-      debugPrint('Error disposing PiP framework: $e');
-    }
+    } catch (_) {}
 
     _disposeMediaKit();
     _hideControlsTimer?.cancel();
@@ -561,7 +593,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   }
 
   void _resetHideControlsTimer() {
-    // Debounce: only reset timer if controls are visible and at least 500ms have passed since last reset
     _debounceHideControlsTimer?.cancel();
     _debounceHideControlsTimer = Timer(const Duration(milliseconds: 500), () {
       _hideControlsTimer?.cancel();

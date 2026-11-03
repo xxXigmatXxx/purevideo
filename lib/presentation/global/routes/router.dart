@@ -93,15 +93,19 @@ final GoRouter router = GoRouter(
         final int? episodeIndex = (state.uri.queryParameters['episode'] != null)
             ? int.tryParse(state.uri.queryParameters['episode']!)
             : null;
+        final int? sourceIndex = (state.uri.queryParameters['source'] != null)
+            ? int.tryParse(state.uri.queryParameters['source']!)
+            : null;
 
         return NoTransitionPage(
           child: PlayerScreen(
             key: ValueKey(
-              '${movie.title}-${seasonIndex ?? 0}-${episodeIndex ?? 0}',
+              '${movie.title}-${seasonIndex ?? 0}-${episodeIndex ?? 0}-${sourceIndex ?? 0}',
             ),
             movie: movie,
             seasonIndex: seasonIndex,
             episodeIndex: episodeIndex,
+            initialSourceIndex: sourceIndex,
           ),
         );
       },

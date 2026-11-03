@@ -42,8 +42,7 @@ class MovieListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => context.pushNamed(
-        'movie_details',
-        pathParameters: {'title': movie.title},
+        'movie_details_plain',
         extra: movie,
       ),
       child: ClipRRect(
@@ -478,8 +477,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   DateTime.now().millisecondsSinceEpoch %
                                       state.movies.length];
                               context.pushNamed(
-                                'movie_details',
-                                pathParameters: {'title': randomMovie.title},
+                                'movie_details_plain',
                                 extra: randomMovie,
                               );
                             },
@@ -703,8 +701,7 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
       child: GestureDetector(
         onTap: () => context.pushNamed(
-          'movie_details',
-          pathParameters: {'title': movie.title},
+          'movie_details_plain',
           extra: movie,
         ),
         child: Container(
@@ -819,8 +816,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: ElevatedButton.icon(
                               onPressed: () => context.pushNamed(
-                                'movie_details',
-                                pathParameters: {'title': movie.title},
+                                'movie_details_plain',
                                 extra: movie,
                               ),
                               style: ElevatedButton.styleFrom(
@@ -937,21 +933,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   final int watchedSec = lastEp != null
                       ? lastEp.watchedEpisode.watchedTime
                       : item.watchedTime;
-                  // Estimate progress bar (assume ~45min for episode, 95min for movie)
                   final int denom = item.movie.isSeries ? 2700 : 5700;
                   final double progress =
-                      (watchedSec / denom).clamp(0.06, 0.96);
+                      (watchedSec / denom).clamp(0.08, 0.96);
 
                   final String subtitle = lastEp != null
                       ? 'S${lastEp.season.number}:E${lastEp.watchedEpisode.episode.number}'
-                      : '${(watchedSec ~/ 60)} min';
+                      : '${(watchedSec ~/ 60) > 0 ? (watchedSec ~/ 60) : 1} min';
 
                   return SizedBox(
-                    width: 118,
+                    width: 126,
                     child: GestureDetector(
                       onTap: () => context.pushNamed(
-                        'movie_details',
-                        pathParameters: {'title': movieModel.title},
+                        'movie_details_plain',
                         extra: movieModel,
                       ),
                       child: ClipRRect(
@@ -971,11 +965,44 @@ class _HomeScreenState extends State<HomeScreen> {
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => Container(
                                         color: const Color(0xFF222222),
-                                        child: const Icon(Icons.movie,
-                                            color: Colors.white38),
+                                        padding: const EdgeInsets.all(8),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          item.movie.title,
+                                          maxLines: 3,
+                                          textAlign: TextAlign.center,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                     Container(color: Colors.black26),
+                                    Positioned(
+                                      top: 4,
+                                      right: 4,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _watchedService
+                                              .removeMovie(item.movie);
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(3),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black87,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.close,
+                                            color: Colors.white70,
+                                            size: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                     Center(
                                       child: Container(
                                         width: 42,
@@ -990,6 +1017,27 @@ class _HomeScreenState extends State<HomeScreen> {
                                           Icons.play_arrow,
                                           color: Colors.white,
                                           size: 26,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 6,
+                                      right: 6,
+                                      bottom: 4,
+                                      child: Text(
+                                        item.movie.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                          shadows: [
+                                            Shadow(
+                                              color: Colors.black,
+                                              blurRadius: 6,
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),

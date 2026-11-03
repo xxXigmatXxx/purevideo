@@ -48,34 +48,6 @@
             </intent-filter>
         </activity-alias>
 
-        <activity-alias
-            android:name=".IconObejrzyjtoAlias"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@drawable/ic_launcher_obejrzyjto"
-            android:roundIcon="@drawable/ic_launcher_obejrzyjto"
-            android:label="Obejrzyj.to"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name=".IconFilmanAlias"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@drawable/ic_launcher_filman"
-            android:roundIcon="@drawable/ic_launcher_filman"
-            android:label="Filman.cc"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

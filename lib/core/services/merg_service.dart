@@ -3,12 +3,20 @@ import 'package:purevideo/data/models/movie_model.dart';
 import 'package:diacritic/diacritic.dart';
 
 class MergeService {
-  // final List<MovieDetailsModel> _movieDetails = [];
   final List<MovieModel> _movies = [];
-  
-  // Pre-compiled regex patterns for better performance
+
   static final _nonWordRegex = RegExp(r'[^\w\s]');
   static final _spacesRegex = RegExp(r'\s+');
+
+  void clear() {
+    _movies.clear();
+  }
+
+  void replaceAll(List<MovieModel> movies) {
+    _movies
+      ..clear()
+      ..addAll(movies);
+  }
 
   Future<void> addFromService(List<ServiceMovieModel> movies) async {
     if (movies.isEmpty) return;

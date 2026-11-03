@@ -11,9 +11,7 @@ class MainActivity : AudioServiceActivity() {
 
     private val aliases = mapOf(
         "default" to "io.github.majusss.purevideo.IconDefaultAlias",
-        "netflix" to "io.github.majusss.purevideo.IconNetflixAlias",
-        "obejrzyjto" to "io.github.majusss.purevideo.IconObejrzyjtoAlias",
-        "filman" to "io.github.majusss.purevideo.IconFilmanAlias"
+        "netflix" to "io.github.majusss.purevideo.IconNetflixAlias"
     )
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -39,14 +37,13 @@ class MainActivity : AudioServiceActivity() {
         val pkg = applicationContext.packageName
         val targetAlias = aliases[selectedKey] ?: aliases["default"]!!
 
-        // Enable the selected alias first, then disable the others
         pm.setComponentEnabledSetting(
             ComponentName(pkg, targetAlias),
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP
         )
 
-        for ((key, aliasName) in aliases) {
+        for ((_, aliasName) in aliases) {
             if (aliasName != targetAlias) {
                 pm.setComponentEnabledSetting(
                     ComponentName(pkg, aliasName),

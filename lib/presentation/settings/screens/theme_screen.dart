@@ -33,7 +33,6 @@ class _ThemeScreenState extends State<ThemeScreen> {
     required Color bg,
     required Color fg,
     required String letter,
-    IconData? icon,
   }) {
     return Container(
       width: 36,
@@ -44,17 +43,15 @@ class _ThemeScreenState extends State<ThemeScreen> {
         border: Border.all(color: Colors.white24, width: 1),
       ),
       alignment: Alignment.center,
-      child: icon != null
-          ? Icon(icon, color: fg, size: 20)
-          : Text(
-              letter,
-              style: TextStyle(
-                color: fg,
-                fontWeight: FontWeight.w900,
-                fontSize: 20,
-                height: 1.0,
-              ),
-            ),
+      child: Text(
+        letter,
+        style: TextStyle(
+          color: fg,
+          fontWeight: FontWeight.w900,
+          fontSize: 20,
+          height: 1.0,
+        ),
+      ),
     );
   }
 
@@ -237,41 +234,6 @@ class _ThemeScreenState extends State<ThemeScreen> {
                           bg: const Color(0xFF000000),
                           fg: const Color(0xFFE50914),
                           letter: 'N',
-                        ),
-                      ),
-                    ),
-                    SettingsItem(
-                      icon: Icons.play_circle_outline_rounded,
-                      title: 'Obejrzyj.to',
-                      subtitle:
-                          'Ikona odtwarzacza oraz nazwa aplikacji „Obejrzyj.to”',
-                      onTap: () => _selectAppIcon('obejrzyjto', 'Obejrzyj.to'),
-                      trailing: _buildIconRadio(
-                        value: 'obejrzyjto',
-                        groupValue: currentIcon,
-                        displayName: 'Obejrzyj.to',
-                        badge: _buildIconBadge(
-                          bg: const Color(0xFF10131A),
-                          fg: const Color(0xFFE50914),
-                          letter: 'O',
-                          icon: Icons.play_circle_fill,
-                        ),
-                      ),
-                    ),
-                    SettingsItem(
-                      icon: Icons.local_movies_outlined,
-                      title: 'Filman.cc',
-                      subtitle:
-                          'Niebieskie logo „F” oraz nazwa aplikacji „Filman.cc”',
-                      onTap: () => _selectAppIcon('filman', 'Filman.cc'),
-                      trailing: _buildIconRadio(
-                        value: 'filman',
-                        groupValue: currentIcon,
-                        displayName: 'Filman.cc',
-                        badge: _buildIconBadge(
-                          bg: const Color(0xFF0B192C),
-                          fg: const Color(0xFF1E88E5),
-                          letter: 'F',
                         ),
                       ),
                     ),

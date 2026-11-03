@@ -36,7 +36,7 @@ void main() async {
   };
 
   await FastCachedImageConfig.init(
-    clearCacheAfter: const Duration(days: 1),
+    clearCacheAfter: const Duration(days: 30),
   );
 
   MediaKit.ensureInitialized();

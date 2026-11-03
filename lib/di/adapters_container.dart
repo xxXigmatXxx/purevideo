@@ -6,6 +6,7 @@ import 'package:purevideo/data/models/watched_model.dart';
 
 void setupHiveAdapters() {
   Hive.registerAdapter(SupportedServiceAdapter());
+  Hive.registerAdapter(ServiceMovieModelAdapter());
   Hive.registerAdapter(MovieModelAdapter());
   Hive.registerAdapter(ServiceMovieDetailsModelAdapter());
   Hive.registerAdapter(MovieDetailsModelAdapter());
