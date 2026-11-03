@@ -1,3 +1,4 @@
+import 'package:purevideo/core/utils/safe_cookie.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -115,7 +116,8 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
 
       if (response.headers['set-cookie'] != null) {
         final cookies = response.headers['set-cookie']
-                ?.map((header) => Cookie.fromSetCookieValue(header))
+                ?.map((header) => RawCookie.parse(header))
+          .whereType<Cookie>()
                 .toList() ??
             [];
 
