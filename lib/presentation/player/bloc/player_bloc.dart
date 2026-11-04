@@ -282,7 +282,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
                 imageUrl: '',
                 isSeries: true,
                 videoUrls:
-                    episodes.expand<HostLink>((e) => e.videoUrls!).toList()),
+                    episodes.expand((e) => e.videoUrls!).toList()),
           ],
           filmwebInfo: _movie!.filmwebInfo,
         );
