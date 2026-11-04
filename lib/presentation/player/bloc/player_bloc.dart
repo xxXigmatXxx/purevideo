@@ -675,6 +675,13 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
   VideoController get controller => _controller;
 
+  void setVolume(double normalizedVolume) {
+    try {
+      final vol = (normalizedVolume.clamp(0.0, 1.0)) * 100.0;
+      _player.setVolume(vol);
+    } catch (_) {}
+  }
+
   Future<void> _onCastVideo(CastVideo event, Emitter<PlayerState> emit) async {
     if (state.castFramework.castContext.state.value == CastState.connected) {
       if (state.selectedSource == null) {

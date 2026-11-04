@@ -95,6 +95,8 @@ class PlayerView extends StatefulWidget {
 class _PlayerViewState extends State<PlayerView> {
   double? _draggingProgress;
   double _brightness = 0.5;
+  double _volume = 1.0;
+  double _lastNonZeroVolume = 1.0;
   Timer? _seekReleaseTimer;
 
   @override
@@ -616,10 +618,10 @@ class _PlayerViewState extends State<PlayerView> {
                   ),
                   child: Stack(
                     children: [
-                      _buildTopBar(context),
+                      _buildTopBar(context, state, bloc),
                       _buildCenterControls(state, bloc),
                       _buildBrightnessControl(context, bloc),
-                      _buildIconsList(context, state, bloc),
+                      _buildVolumeControl(context, bloc),
                       _buildBottomBar(context, state, bloc),
                     ],
                   ),
@@ -819,7 +821,84 @@ class _PlayerViewState extends State<PlayerView> {
     return Icons.brightness_low;
   }
 
-  Widget _buildTopBar(BuildContext context) {
+  Widget _buildVolumeControl(BuildContext context, PlayerBloc bloc) {
+    return Positioned(
+      right: 16,
+      top: 56,
+      bottom: 64,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                if (_volume > 0.0) {
+                  _lastNonZeroVolume = _volume;
+                  _volume = 0.0;
+                } else {
+                  _volume = _lastNonZeroVolume > 0.05 ? _lastNonZeroVolume : 1.0;
+                }
+              });
+              bloc.add(const ShowControls());
+              bloc.setVolume(_volume);
+            },
+            child: Icon(
+              _getVolumeIcon(_volume),
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 150,
+            child: RotatedBox(
+              quarterTurns: -1,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 4.0,
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white30,
+                  thumbColor: Colors.white,
+                  overlayColor: Colors.white24,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 7.0),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 14.0),
+                ),
+                child: Slider(
+                  value: _volume.clamp(0.0, 1.0),
+                  min: 0.0,
+                  max: 1.0,
+                  onChangeStart: (_) {
+                    bloc.add(const ShowControls());
+                  },
+                  onChanged: (value) {
+                    setState(() {
+                      _volume = value;
+                      if (value > 0.0) {
+                        _lastNonZeroVolume = value;
+                      }
+                    });
+                    bloc.add(const ShowControls());
+                    bloc.setVolume(value);
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getVolumeIcon(final double volume) {
+    if (volume <= 0.01) return Icons.volume_off_rounded;
+    if (volume < 0.5) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
+
+  Widget _buildTopBar(
+      BuildContext context, PlayerState state, PlayerBloc bloc) {
     final playerScreen = context.findAncestorWidgetOfExactType<PlayerScreen>();
     final movie = playerScreen!.movie;
 
@@ -840,18 +919,14 @@ class _PlayerViewState extends State<PlayerView> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         width: double.infinity,
         height: 52,
-        child: Stack(
-          alignment: Alignment.center,
+        child: Row(
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
+            IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
+              onPressed: () => Navigator.of(context).pop(),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 140),
+            const SizedBox(width: 8),
+            Expanded(
               child: Text(
                 title,
                 style: const TextStyle(
@@ -864,11 +939,34 @@ class _PlayerViewState extends State<PlayerView> {
                 textAlign: TextAlign.center,
               ),
             ),
-            if (movie.isSeries)
-              Align(
-                alignment: Alignment.centerRight,
-                child: _buildNextEpisodeButton(context),
-              ),
+            const SizedBox(width: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (movie.isSeries) ...[
+                  _buildNextEpisodeButton(context),
+                  const SizedBox(width: 4),
+                ],
+                IconButton(
+                  tooltip: state.isImersive
+                      ? 'Dopasuj obraz'
+                      : 'Wypełnij ekran',
+                  icon: Icon(
+                    state.isImersive ? Icons.fullscreen_exit : Icons.fullscreen,
+                    color: Colors.white,
+                  ),
+                  onPressed: () {
+                    bloc.add(const ToggleImmersiveMode());
+                  },
+                ),
+                CastButton(
+                  castFramework: state.castFramework,
+                  activeColor: _kNetflixRed,
+                  color: Colors.white,
+                  disabledColor: Colors.white54,
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -909,43 +1007,6 @@ class _PlayerViewState extends State<PlayerView> {
             },
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildIconsList(
-      BuildContext context, PlayerState state, PlayerBloc bloc) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Padding(
-        padding: const EdgeInsets.only(right: 12),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (state.videoSources != null && state.videoSources!.length > 1)
-              IconButton(
-                icon: const Icon(Icons.dns_rounded, color: Colors.white),
-                tooltip: 'Wybierz źródło wideo',
-                onPressed: () =>
-                    _showSourcesBottomSheet(context, state, bloc),
-              ),
-            IconButton(
-              icon: Icon(
-                state.isImersive ? Icons.fullscreen_exit : Icons.fullscreen,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                bloc.add(const ToggleImmersiveMode());
-              },
-            ),
-            CastButton(
-              castFramework: state.castFramework,
-              activeColor: _kNetflixRed,
-              color: Colors.white,
-              disabledColor: Colors.white54,
-            ),
-          ],
-        ),
       ),
     );
   }
