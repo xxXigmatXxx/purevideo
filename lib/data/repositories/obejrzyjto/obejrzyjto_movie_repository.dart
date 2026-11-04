@@ -31,6 +31,26 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     );
   }
 
+  bool _isTrailerVideo(dynamic video) {
+    if (video is! Map) return true;
+    final cat = (video['category'] ?? '').toString().toLowerCase().trim();
+    if (cat == 'trailer' || cat == 'teaser' || cat == 'clip') {
+      return true;
+    }
+    final name = (video['name'] ?? '').toString().toLowerCase().trim();
+    if (name.contains('zwiastun') ||
+        name.contains('trailer') ||
+        name.contains('youtube')) {
+      return true;
+    }
+    final src = (video['src'] ?? '').toString().toLowerCase().trim();
+    if (src.isNotEmpty &&
+        (src.contains('youtube.com') || src.contains('youtu.be'))) {
+      return true;
+    }
+    return false;
+  }
+
   @override
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     await _prepareDio();
@@ -38,7 +58,6 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     final episodeResponse = await _dio!.get(episode.url);
 
     final bootstrapData = extractBootstrapData(episodeResponse.data);
-
     if (bootstrapData == null) {
       throw Exception(
           'Nie udało się pobrać danych bootstrap z odpowiedzi serwera.');
@@ -109,10 +128,13 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
         for (var j = 1; j <= episodesData.length; j++) {
           final episodeData = episodesData[j - 1];
           final name = episodeData['name'] as String?;
+
           if (name == null || name.isEmpty) {
             continue;
           }
+
           final epNum = (episodeData['episode_number'] as int?) ?? j;
+
           episodes.add(EpisodeModel(
             title: name,
             number: epNum,
@@ -142,8 +164,8 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     await _prepareDio();
 
     final response = await _dio!.get(url);
-    final bootstrapData = extractBootstrapData(response.data);
 
+    final bootstrapData = extractBootstrapData(response.data);
     if (bootstrapData == null) {
       throw Exception(
           'Nie udało się pobrać danych bootstrap z odpowiedzi serwera.');
@@ -170,6 +192,7 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     }
 
     final videoUrls = _extractVideoUrls(combinedVideos);
+
     final movieModel = _buildMovieDetails(url, details, videoUrls);
 
     if (movieModel.isSeries) {
@@ -195,12 +218,9 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
 
     for (final video in videoData) {
       if (video is! Map) continue;
+      if (_isTrailerVideo(video)) continue;
       final rawUrl = (video['src'] as String?)?.trim();
       if (rawUrl == null || rawUrl.isEmpty) {
-        continue;
-      }
-      final lowerUrl = rawUrl.toLowerCase();
-      if (lowerUrl.contains('youtube.com') || lowerUrl.contains('youtu.be')) {
         continue;
       }
 
@@ -208,14 +228,26 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
       if (!seenUrls.add(cleanUrl)) continue;
 
       final rawQuality = (video['quality'] as String?)?.trim();
+      final rawLangType = (video['language_type'] as String?)?.trim().toLowerCase();
       final rawLang = (video['language'] as String?)?.trim();
 
       final quality = (rawQuality != null && rawQuality.isNotEmpty)
           ? rawQuality.toUpperCase()
           : 'HD';
-      final lang = (rawLang != null && rawLang.isNotEmpty)
+      String lang = (rawLang != null && rawLang.isNotEmpty)
           ? rawLang.toUpperCase()
           : 'PL';
+      if (rawLangType != null && rawLangType.isNotEmpty) {
+        if (rawLangType.contains('lektor') && rawLangType.contains('napisy')) {
+          lang = 'Lektor/Napisy';
+        } else if (rawLangType.contains('lektor')) {
+          lang = 'Lektor PL';
+        } else if (rawLangType.contains('dubbing')) {
+          lang = 'Dubbing PL';
+        } else if (rawLangType.contains('napisy')) {
+          lang = 'Napisy PL';
+        }
+      }
 
       videoUrls.add(HostLink(
         url: cleanUrl,
@@ -255,20 +287,17 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     await _prepareDio();
 
     final response = await _dio!.get('/');
+
     final bootstrapData = extractBootstrapData(response.data);
+    if (bootstrapData == null) return [];
 
-    return bootstrapData != null
-        ? _parseMoviesFromData(bootstrapData)
-        : <ServiceMovieModel>[];
-  }
+    final channelData =
+        bootstrapData['loaders']?['channelPage']?['channel']?['content']?['data'];
+    if (channelData is! List) return [];
 
-  List<ServiceMovieModel> _parseMoviesFromData(Map<String, dynamic> data) {
-    final loaders = data['loaders']?['channelPage']?['channel']?['content']
-        ?['data'] as List?;
-    if (loaders == null) return <ServiceMovieModel>[];
-
-    return loaders
-        .expand((loader) => _parseMoviesFromLoader(loader))
+    return channelData
+        .whereType<Map<String, dynamic>>()
+        .expand(_parseMoviesFromLoader)
         .whereType<ServiceMovieModel>()
         .toList();
   }
@@ -276,32 +305,75 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
   Iterable<ServiceMovieModel?> _parseMoviesFromLoader(
       Map<String, dynamic> loader) {
     final loaderName = (loader['name'] as String?)?.trim();
+    final lowerName = (loaderName ?? '').toLowerCase();
+    if (lowerName.contains('wkrótce') ||
+        lowerName.contains('wkrotce') ||
+        lowerName.contains('zapowied') ||
+        lowerName.contains('upcoming')) {
+      return const [];
+    }
     final contentData = loader['content']?['data'] as List?;
 
     return contentData
-            ?.map((movieData) => _parseMovie(movieData, loaderName)) ??
+            ?.whereType<Map<String, dynamic>>()
+            .map((movieData) => _parseMovie(movieData, loaderName)) ??
         [];
   }
 
   ServiceMovieModel? _parseMovie(Map<String, dynamic> data, String? category) {
     final name = (data['name'] as String?)?.trim();
     final poster = (data['poster'] as String?)?.trim();
-    final primaryVideoId = data['primary_video']?['id'];
 
-    if (name == null ||
-        name.isEmpty ||
-        primaryVideoId == null ||
-        poster == null ||
-        poster.isEmpty) {
+    if (name == null || name.isEmpty || poster == null || poster.isEmpty) {
       return null;
     }
 
-    return ServiceMovieModel(
-      service: SupportedService.obejrzyjto,
-      title: name,
-      imageUrl: poster,
-      url: '/watch/$primaryVideoId',
-      category: category ?? '',
-    );
+    final isSeries = data['is_series']?.toString() == 'true';
+    final primaryVideo = data['primary_video'];
+
+    if (!isSeries) {
+      if (primaryVideo is! Map || primaryVideo['id'] == null) {
+        return null;
+      }
+      if (_isTrailerVideo(primaryVideo)) {
+        return null;
+      }
+      return ServiceMovieModel(
+        service: SupportedService.obejrzyjto,
+        title: name,
+        imageUrl: poster,
+        url: '/watch/${primaryVideo['id']}',
+        category: category ?? '',
+      );
+    } else {
+      final epRangeSize = (data['episode_range_size'] as int?) ?? 1;
+      if (epRangeSize <= 0) return null;
+
+      final primaryVideoId =
+          (primaryVideo is Map) ? primaryVideo['id'] : null;
+      final latestEpVideoId =
+          (data['latest_episode_video'] is Map)
+              ? data['latest_episode_video']['id']
+              : null;
+      final titleId = data['id'];
+
+      String? targetUrl;
+      if (primaryVideoId != null) {
+        targetUrl = '/watch/$primaryVideoId';
+      } else if (latestEpVideoId != null) {
+        targetUrl = '/watch/$latestEpVideoId';
+      } else if (titleId != null) {
+        targetUrl = '/titles/$titleId/${generateSlug(name)}';
+      }
+      if (targetUrl == null) return null;
+
+      return ServiceMovieModel(
+        service: SupportedService.obejrzyjto,
+        title: name,
+        imageUrl: poster,
+        url: targetUrl,
+        category: category ?? 'Seriale',
+      );
+    }
   }
 }

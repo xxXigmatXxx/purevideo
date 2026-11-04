@@ -151,6 +151,28 @@ class ResolveUrlService {
         'Origin': origin,
       };
 
+      // 0. Vidneo.cc: Next.js payload with "/hls/.../master.m3u8"
+      if (currentUrl.contains('vidneo.') || html.contains('VIDNEO')) {
+        final vnMatch = RegExp(
+          r'''\\?"src\\?"\s*:\s*\\?"(/hls/[^"\\]+\.m3u8[^"\\]*)\\?"''',
+        ).firstMatch(html);
+        if (vnMatch != null) {
+          final hlsPath = vnMatch.group(1)!;
+          final fullUrl =
+              hlsPath.startsWith('http') ? hlsPath : '$origin$hlsPath';
+          return VideoSource(
+            url: fullUrl,
+            lang: link.lang,
+            quality: link.quality,
+            host: 'Vidneo',
+            headers: {
+              ...hdrs,
+              'Referer': currentUrl,
+            },
+          );
+        }
+      }
+
       // 1. VOE: application/json script block
       final jsonScriptMatches = RegExp(
         r'''<script[^>]*type=["']application/json["'][^>]*>([\s\S]*?)</script>''',

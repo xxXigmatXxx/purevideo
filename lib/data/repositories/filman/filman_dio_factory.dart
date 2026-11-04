@@ -88,12 +88,16 @@ class FilmanDioFactory {
                       SupportedService.filman];
               final account = authRepository?.getAccount();
               if (account != null) {
-                final updatedCookies = account.cookies.map((cookie) {
-                  if (cookie.name == 'cf_clearance') {
-                    return cfClearance;
-                  }
-                  return cookie;
-                }).toList();
+                final cookieMap = <String, Cookie>{
+                  for (final c in account.cookies) c.name: c,
+                  for (final c in (cookies ?? const <Cookie>[])) c.name: c,
+                };
+                final updatedCookies = cookieMap.values.toList();
+                final mergedCookieHeader = updatedCookies
+                    .map((cookie) => '${cookie.name}=${cookie.value}')
+                    .join('; ');
+                dio.options.headers['Cookie'] = mergedCookieHeader;
+                requestOptions.headers['Cookie'] = mergedCookieHeader;
 
                 authRepository?.setAccount(AccountModel(
                   service: SupportedService.filman,
