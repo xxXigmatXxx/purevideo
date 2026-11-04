@@ -192,7 +192,32 @@ class _HomeScreenState extends State<HomeScreen> {
       return 'Polecane dla Ciebie';
     }
     final lower = trimmed.toLowerCase();
+    if (lower.contains('bajki') ||
+        lower == 'animacja' ||
+        lower == 'seriale animowane') {
+      return 'Bajki dla dzieci';
+    }
+    if (lower.contains('familij')) {
+      return 'Familijne';
+    }
     return lower[0].toUpperCase() + lower.substring(1);
+  }
+
+  List<String> _extractMovieCategories(MovieModel movie) {
+    final cats = <String>{};
+    for (final s in movie.services) {
+      final raw = s.category ?? '';
+      for (final part in raw.split('|')) {
+        if (part.trim().isNotEmpty) {
+          cats.add(_cleanCategoryName(part));
+        }
+      }
+    }
+    if (cats.isEmpty) {
+      cats.add(
+          _isSeriesMovie(movie) ? 'Popularne seriale' : 'Popularne filmy');
+    }
+    return cats.toList();
   }
 
   List<MovieModel> _applyFilter(List<MovieModel> all) {
@@ -206,30 +231,37 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (_selectedCategory != null) {
       list = list
-          .where((m) => m.services.any(
-              (s) => _cleanCategoryName(s.category ?? '') == _selectedCategory))
+          .where((m) => _extractMovieCategories(m).contains(_selectedCategory))
           .toList();
     }
     return list;
   }
 
   Map<String, List<MovieModel>> _groupByCategories(List<MovieModel> movies) {
-    final map = <String, List<MovieModel>>{};
+    final rawMap = <String, List<MovieModel>>{};
     for (final movie in movies) {
-      String? cat;
-      for (final s in movie.services) {
-        if (s.category != null && s.category!.trim().isNotEmpty) {
-          cat = _cleanCategoryName(s.category!);
-          break;
+      final cats = _extractMovieCategories(movie);
+      for (final cat in cats) {
+        if (_selectedCategory != null && cat != _selectedCategory) continue;
+        final bucket = rawMap.putIfAbsent(cat, () => []);
+        if (!bucket.any((m) => m.title == movie.title)) {
+          bucket.add(movie);
         }
       }
-      cat ??= _isSeriesMovie(movie) ? 'Popularne seriale' : 'Popularne filmy';
-      final bucket = map.putIfAbsent(cat, () => []);
-      if (!bucket.any((m) => m.title == movie.title)) {
-        bucket.add(movie);
+    }
+    final ordered = <String, List<MovieModel>>{};
+    for (final priority in const [
+      'Bajki dla dzieci',
+      'Familijne',
+      'Popularne filmy',
+      'Ostatnio dodane filmy',
+    ]) {
+      if (rawMap.containsKey(priority)) {
+        ordered[priority] = rawMap.remove(priority)!;
       }
     }
-    return map;
+    ordered.addAll(rawMap);
+    return ordered;
   }
 
   void _showCategoryPicker(BuildContext context, List<String> categories) {
@@ -618,6 +650,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       _selectedFilter = _selectedFilter == _HomeFilter.movies
                           ? _HomeFilter.all
                           : _HomeFilter.movies;
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(
+                    label: 'Bajki dla dzieci',
+                    selected: _selectedCategory == 'Bajki dla dzieci',
+                    onTap: () => setState(() {
+                      _selectedCategory =
+                          _selectedCategory == 'Bajki dla dzieci'
+                              ? null
+                              : 'Bajki dla dzieci';
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildFilterChip(
+                    label: 'Familijne',
+                    selected: _selectedCategory == 'Familijne',
+                    onTap: () => setState(() {
+                      _selectedCategory = _selectedCategory == 'Familijne'
+                          ? null
+                          : 'Familijne';
                     }),
                   ),
                   const SizedBox(width: 8),

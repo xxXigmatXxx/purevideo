@@ -382,10 +382,7 @@ class ResolveUrlService {
       }
     }
 
-    if (nativeSources.isNotEmpty) {
-      return [...nativeSources, ...fallbackSources];
-    }
-    return fallbackSources;
+    return nativeSources.where((s) => !s.host.contains('(Web)')).toList();
   }
 
   Future<bool> _waitForServer() async {

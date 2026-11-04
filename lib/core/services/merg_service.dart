@@ -4,7 +4,6 @@ import 'package:diacritic/diacritic.dart';
 
 class MergeService {
   final List<MovieModel> _movies = [];
-
   static final _nonWordRegex = RegExp(r'[^\w\s]');
   static final _spacesRegex = RegExp(r'\s+');
 
@@ -18,9 +17,23 @@ class MergeService {
       ..addAll(movies);
   }
 
+  String? _mergeCategoryStrings(String? a, String? b) {
+    final parts = <String>{};
+    if (a != null && a.trim().isNotEmpty) {
+      for (final p in a.split('|')) {
+        if (p.trim().isNotEmpty) parts.add(p.trim());
+      }
+    }
+    if (b != null && b.trim().isNotEmpty) {
+      for (final p in b.split('|')) {
+        if (p.trim().isNotEmpty) parts.add(p.trim());
+      }
+    }
+    return parts.isEmpty ? null : parts.join('|');
+  }
+
   Future<void> addFromService(List<ServiceMovieModel> movies) async {
     if (movies.isEmpty) return;
-
     for (final movie in movies) {
       final normalizedTitle = _normalizeTitle(movie.title);
 
@@ -32,13 +45,27 @@ class MergeService {
 
       if (existingMovieIndex != -1) {
         final existingMovie = _movies[existingMovieIndex];
-        final hasService = existingMovie.services.any(
+        final existingSvcIdx = existingMovie.services.indexWhere(
           (service) => service.service == movie.service,
         );
 
-        if (!hasService) {
+        if (existingSvcIdx == -1) {
           final updatedServices = [...existingMovie.services, movie];
           _movies[existingMovieIndex] = MovieModel(services: updatedServices);
+        } else {
+          final oldSvc = existingMovie.services[existingSvcIdx];
+          final mergedCat = _mergeCategoryStrings(oldSvc.category, movie.category);
+          if (mergedCat != oldSvc.category) {
+            final updatedServices = List<ServiceMovieModel>.from(existingMovie.services);
+            updatedServices[existingSvcIdx] = ServiceMovieModel(
+              service: oldSvc.service,
+              url: oldSvc.url,
+              title: oldSvc.title,
+              imageUrl: oldSvc.imageUrl,
+              category: mergedCat,
+            );
+            _movies[existingMovieIndex] = MovieModel(services: updatedServices);
+          }
         }
       } else {
         _movies.add(MovieModel(services: [movie]));
@@ -49,10 +76,8 @@ class MergeService {
   Future<List<MovieModel>> addFromServiceTemp(
       List<ServiceMovieModel> toAdd, List<MovieModel> existingMovies) async {
     if (toAdd.isEmpty) return [];
-
     for (final movie in toAdd) {
       final normalizedTitle = _normalizeTitle(movie.title);
-      debugPrint('Normalized Title: $normalizedTitle');
 
       final existingMovieIndex = existingMovies.indexWhere(
         (existingMovie) =>
@@ -62,20 +87,35 @@ class MergeService {
 
       if (existingMovieIndex != -1) {
         final existingMovie = existingMovies[existingMovieIndex];
-        final hasService = existingMovie.services.any(
+        final existingSvcIdx = existingMovie.services.indexWhere(
           (service) => service.service == movie.service,
         );
 
-        if (!hasService) {
+        if (existingSvcIdx == -1) {
           final updatedServices = [...existingMovie.services, movie];
           existingMovies[existingMovieIndex] =
               MovieModel(services: updatedServices);
+        } else {
+          final oldSvc = existingMovie.services[existingSvcIdx];
+          final mergedCat = _mergeCategoryStrings(oldSvc.category, movie.category);
+          if (mergedCat != oldSvc.category) {
+            final updatedServices =
+                List<ServiceMovieModel>.from(existingMovie.services);
+            updatedServices[existingSvcIdx] = ServiceMovieModel(
+              service: oldSvc.service,
+              url: oldSvc.url,
+              title: oldSvc.title,
+              imageUrl: oldSvc.imageUrl,
+              category: mergedCat,
+            );
+            existingMovies[existingMovieIndex] =
+                MovieModel(services: updatedServices);
+          }
         }
       } else {
         existingMovies.add(MovieModel(services: [movie]));
       }
     }
-
     return existingMovies;
   }
 

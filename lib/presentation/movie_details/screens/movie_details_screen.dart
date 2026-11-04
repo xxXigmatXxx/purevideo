@@ -216,7 +216,7 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
 
   void _showMovieLinksBottomSheet(
       BuildContext context, MovieDetailsState state) {
-    final sources = state.movie?.directUrls ?? const <VideoSource>[];
+    final sources = (state.movie?.directUrls ?? const <VideoSource>[]).where((s) => !s.host.contains('(Web)')).toList();
     if (sources.isEmpty) return;
 
     showModalBottomSheet(
@@ -691,7 +691,7 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
         .take(9)
         .toList();
 
-    final directSources = movie.directUrls ?? const <VideoSource>[];
+    final directSources = (movie.directUrls ?? const <VideoSource>[]).where((s) => !s.host.contains('(Web)')).toList();
 
     return Scaffold(
       backgroundColor: Colors.black,

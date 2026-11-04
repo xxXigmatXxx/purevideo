@@ -282,24 +282,82 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     );
   }
 
+  bool _isAdultCert(Map<String, dynamic> data) {
+    final cert = (data['certification'] ?? '').toString().toLowerCase().trim();
+    return cert == 'ma' || cert == 'r' || cert == '18' || cert == 'nc-17';
+  }
+
+  String _enrichCategoryWithGenres(
+      Map<String, dynamic> data, String? baseCategory) {
+    final cats = <String>{};
+    if (baseCategory != null && baseCategory.trim().isNotEmpty) {
+      cats.add(baseCategory.trim());
+    }
+    final isAdult = _isAdultCert(data);
+    final genres = data['genres'];
+    if (genres is List && !isAdult) {
+      for (final g in genres) {
+        if (g is Map) {
+          final gName = (g['name'] ?? '').toString().toLowerCase().trim();
+          if (gName == 'animacja') {
+            cats.add('Bajki dla dzieci');
+          } else if (gName == 'familijny') {
+            cats.add('Familijne');
+          }
+        }
+      }
+    }
+    return cats.join('|');
+  }
+
+  Future<List<ServiceMovieModel>> _fetchGenreChannel(
+      String path, String categoryLabel) async {
+    try {
+      final resp =
+          await _dio!.get(path).timeout(const Duration(seconds: 12));
+      final bootstrapData = extractBootstrapData(resp.data);
+      if (bootstrapData == null) return [];
+      final items = bootstrapData['loaders']?['channelPage']?['channel']
+          ?['content']?['data'];
+      if (items is! List) return [];
+      return items
+          .whereType<Map<String, dynamic>>()
+          .where((m) => !_isAdultCert(m))
+          .map((m) => _parseMovie(m, categoryLabel))
+          .whereType<ServiceMovieModel>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   @override
   Future<List<ServiceMovieModel>> getMovies() async {
     await _prepareDio();
 
-    final response = await _dio!.get('/');
+    final results = await Future.wait([
+      () async {
+        final response = await _dio!.get('/');
+        final bootstrapData = extractBootstrapData(response.data);
+        if (bootstrapData == null) return <ServiceMovieModel>[];
+        final channelData = bootstrapData['loaders']?['channelPage']?['channel']
+            ?['content']?['data'];
+        if (channelData is! List) return <ServiceMovieModel>[];
+        return channelData
+            .whereType<Map<String, dynamic>>()
+            .expand(_parseMoviesFromLoader)
+            .whereType<ServiceMovieModel>()
+            .toList();
+      }(),
+      _fetchGenreChannel('/genre/animacja', 'Bajki dla dzieci'),
+      _fetchGenreChannel('/genre/familijny', 'Familijne'),
+    ]);
 
-    final bootstrapData = extractBootstrapData(response.data);
-    if (bootstrapData == null) return [];
-
-    final channelData =
-        bootstrapData['loaders']?['channelPage']?['channel']?['content']?['data'];
-    if (channelData is! List) return [];
-
-    return channelData
-        .whereType<Map<String, dynamic>>()
-        .expand(_parseMoviesFromLoader)
-        .whereType<ServiceMovieModel>()
-        .toList();
+    return [
+      ...results[1],
+      ...results[2],
+      ...results[0],
+    ];
   }
 
   Iterable<ServiceMovieModel?> _parseMoviesFromLoader(
@@ -343,7 +401,7 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
         title: name,
         imageUrl: poster,
         url: '/watch/${primaryVideo['id']}',
-        category: category ?? '',
+        category: _enrichCategoryWithGenres(data, category),
       );
     } else {
       final epRangeSize = (data['episode_range_size'] as int?) ?? 1;
@@ -372,7 +430,7 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
         title: name,
         imageUrl: poster,
         url: targetUrl,
-        category: category ?? 'Seriale',
+        category: _enrichCategoryWithGenres(data, category ?? 'Seriale'),
       );
     }
   }

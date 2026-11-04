@@ -142,7 +142,7 @@ class _PlayerViewState extends State<PlayerView> {
 
   void _showSourcesBottomSheet(
       BuildContext context, PlayerState state, PlayerBloc bloc) {
-    final sources = state.videoSources ?? const <VideoSource>[];
+    final sources = (state.videoSources ?? const <VideoSource>[]).where((s) => !s.host.contains('(Web)')).toList();
     if (sources.isEmpty) return;
 
     bloc.add(const ShowControls());
