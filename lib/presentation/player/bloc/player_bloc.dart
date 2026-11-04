@@ -40,13 +40,15 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       getIt<Map<SupportedService, MovieRepository>>();
   final MediaService _mediaService = getIt<MediaService>();
 
-  late final AudioSession _audioSession;
+  AudioSession? _audioSession;
 
   MovieDetailsModel? _movie;
   int? _seasonIndex;
   int? _episodeIndex;
   int? _initialSourceIndex;
   int _lastSavedSecond = -1;
+  int _lastEmittedSecond = -1;
+  Duration _latestPosition = Duration.zero;
 
   PlayerBloc()
       : super(PlayerState(
@@ -76,7 +78,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   void _saveWatchedProgress([int? overrideSeconds]) {
     if (_movie == null) return;
     try {
-      final sec = overrideSeconds ?? state.position.inSeconds;
+      final sec = overrideSeconds ?? _latestPosition.inSeconds;
       if (_movie!.isSeries &&
           _seasonIndex != null &&
           _episodeIndex != null &&
@@ -115,24 +117,54 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     return super.close();
   }
 
-  void _initMediaKit() {
-    _player = Player();
-    _controller = VideoController(_player);
+  Future<void> _initMediaKit() async {
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        bufferSize: 64 * 1024 * 1024,
+      ),
+    );
+    try {
+      final dynamic nativePlayer = _player.platform;
+      await nativePlayer.setProperty('hwdec', 'auto-safe');
+      await nativePlayer.setProperty('cache', 'yes');
+      await nativePlayer.setProperty('demuxer-max-bytes', '67108864');
+      await nativePlayer.setProperty('demuxer-max-back-bytes', '33554432');
+      await nativePlayer.setProperty('framedrop', 'vo');
+      await nativePlayer.setProperty('vd-lavc-threads', '0');
+    } catch (_) {}
+
+    _controller = VideoController(
+      _player,
+      configuration: const VideoControllerConfiguration(
+        enableHardwareAcceleration: true,
+      ),
+    );
 
     _positionSubscription = _player.stream.position.listen((position) {
-      add(UpdatePosition(position: position));
+      _latestPosition = position;
+      final sec = position.inSeconds;
+      if (sec != _lastEmittedSecond) {
+        _lastEmittedSecond = sec;
+        add(UpdatePosition(position: position));
+      }
     });
 
     _durationSubscription = _player.stream.duration.listen((duration) {
-      add(UpdateDuration(duration: duration));
+      if (duration != state.duration) {
+        add(UpdateDuration(duration: duration));
+      }
     });
 
     _playingSubscription = _player.stream.playing.listen((playing) {
-      add(UpdatePlayingState(isPlaying: playing));
+      if (playing != state.isPlaying) {
+        add(UpdatePlayingState(isPlaying: playing));
+      }
     });
 
     _bufferingSubscription = _player.stream.buffering.listen((buffering) {
-      add(UpdateBufferingState(isBuffering: buffering));
+      if (buffering != state.isBuffering) {
+        add(UpdateBufferingState(isBuffering: buffering));
+      }
     });
   }
 
@@ -163,7 +195,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _episodeIndex = event.episodeIndex;
     _initialSourceIndex = event.initialSourceIndex;
 
-    _initMediaKit();
+    await _initMediaKit();
 
     const options = PipOptions(
       autoEnterEnabled: true,
@@ -250,7 +282,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
                 imageUrl: '',
                 isSeries: true,
                 videoUrls:
-                    episodes.expand((e) => e.videoUrls!).toList()),
+                    episodes.expand<HostLink>((e) => e.videoUrls!).toList()),
           ],
           filmwebInfo: _movie!.filmwebInfo,
         );
@@ -309,30 +341,37 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       final sessionManager = state.castFramework.castContext.sessionManager;
       sessionManager.remoteMediaClient.onProgressUpdated =
           (final progressMs, final durationMs) {
-        add(UpdatePosition(
-          position: Duration(milliseconds: progressMs),
-        ));
+        final pos = Duration(milliseconds: progressMs);
+        _latestPosition = pos;
+        if (pos.inSeconds != _lastEmittedSecond) {
+          _lastEmittedSecond = pos.inSeconds;
+          add(UpdatePosition(position: pos));
+        }
       };
     }
 
     try {
-      _castStateListener = () async {
-        switch (state.castFramework.castContext.state.value) {
-          case CastState.connected:
-            add(const CastVideo());
-            break;
-          default:
-            break;
-        }
-      };
-      state.castFramework.castContext.state.addListener(_castStateListener!);
+      if (_castStateListener == null) {
+        _castStateListener = () async {
+          switch (state.castFramework.castContext.state.value) {
+            case CastState.connected:
+              add(const CastVideo());
+              break;
+            default:
+              break;
+          }
+        };
+        state.castFramework.castContext.state.addListener(_castStateListener!);
+      }
     } catch (e) {
       debugPrint('Error initializing google cast: $e');
     }
 
     try {
-      _audioSession = await AudioSession.instance;
-      await _audioSession.configure(const AudioSessionConfiguration.music());
+      if (_audioSession == null) {
+        _audioSession = await AudioSession.instance;
+        await _audioSession!.configure(const AudioSessionConfiguration.music());
+      }
     } catch (e) {
       debugPrint('Error initializing audio session: $e');
     }
@@ -341,7 +380,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       final Map<String, String> headers = event.source.headers ?? {};
 
       int? watchedPosition;
-
       if (_seasonIndex != null && _episodeIndex != null) {
         final episode =
             _movie!.seasons![_seasonIndex!].episodes[_episodeIndex!];
@@ -352,10 +390,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         watchedPosition = watchedMovie?.watchedTime;
       }
 
-      // Immediately record in "Ostatnio oglądane" when starting playback!
       _saveWatchedProgress(watchedPosition ?? 0);
 
       debugPrint('[PlayerBloc] Opening media: ${event.source.url}');
+
       Future.delayed(const Duration(seconds: 6), () {
         if (!isClosed && state.isBuffering) {
           emit(state.copyWith(
@@ -404,9 +442,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     PlayPause event,
     Emitter<PlayerState> emit,
   ) async {
-    _audioSession.setActive(!state.isPlaying);
+    _audioSession?.setActive(!state.isPlaying);
     _player.playOrPause();
-
+    _saveWatchedProgress();
     if (state.isOverlayVisible) {
       _resetHideControlsTimer();
     }
@@ -419,8 +457,12 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     final position = Duration(
       milliseconds: (event.position * state.duration.inMilliseconds).round(),
     );
+    _latestPosition = position;
+    _lastEmittedSecond = position.inSeconds;
     _player.seek(position);
+    emit(state.copyWith(position: position));
     _saveWatchedProgress(position.inSeconds);
+    _updateNotification();
   }
 
   Future<void> _onSeekWithDirection(
@@ -430,19 +472,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     final direction =
         event.isForward ? SeekDirection.forward : SeekDirection.backward;
 
-    emit(state.copyWith(
-      seekDirection: direction,
-      isSeeking: true,
-      isOverlayVisible: false,
-    ));
-
-    _seekingTimer?.cancel();
-    _seekingTimer = Timer(const Duration(milliseconds: 400), () {
-      add(const HideSeekingIndicator());
-    });
-
-    int newPositionSeconds = state.position.inSeconds;
-
+    int newPositionSeconds = _latestPosition.inSeconds;
     if (direction == SeekDirection.backward) {
       newPositionSeconds = max(0, newPositionSeconds - 10);
     } else {
@@ -450,8 +480,25 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
           min(newPositionSeconds + 10, state.duration.inSeconds);
     }
 
-    _player.seek(Duration(seconds: newPositionSeconds));
+    final newPos = Duration(seconds: newPositionSeconds);
+    _latestPosition = newPos;
+    _lastEmittedSecond = newPositionSeconds;
+
+    emit(state.copyWith(
+      seekDirection: direction,
+      isSeeking: true,
+      isOverlayVisible: false,
+      position: newPos,
+    ));
+
+    _seekingTimer?.cancel();
+    _seekingTimer = Timer(const Duration(milliseconds: 400), () {
+      add(const HideSeekingIndicator());
+    });
+
+    _player.seek(newPos);
     _saveWatchedProgress(newPositionSeconds);
+    _updateNotification();
   }
 
   Future<void> _onChangeVideoSource(
@@ -470,7 +517,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       emit(state.copyWith(isOverlayVisible: false));
       _hideControlsTimer?.cancel();
     } else {
-      emit(state.copyWith(isOverlayVisible: true));
+      emit(state.copyWith(
+        isOverlayVisible: true,
+        position: _latestPosition,
+      ));
       _resetHideControlsTimer();
     }
   }
@@ -479,7 +529,12 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     ShowControls event,
     Emitter<PlayerState> emit,
   ) async {
-    emit(state.copyWith(isOverlayVisible: true));
+    if (!state.isOverlayVisible) {
+      emit(state.copyWith(
+        isOverlayVisible: true,
+        position: _latestPosition,
+      ));
+    }
     _resetHideControlsTimer();
   }
 
@@ -487,7 +542,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     HideControls event,
     Emitter<PlayerState> emit,
   ) async {
-    emit(state.copyWith(isOverlayVisible: false));
+    if (state.isOverlayVisible) {
+      emit(state.copyWith(isOverlayVisible: false));
+    }
   }
 
   Future<void> _onHideSeekingIndicator(
@@ -501,13 +558,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     UpdatePosition event,
     Emitter<PlayerState> emit,
   ) async {
-    emit(state.copyWith(position: event.position));
+    _latestPosition = event.position;
     final curSec = event.position.inSeconds;
-    if (curSec > 0 && (curSec - _lastSavedSecond).abs() >= 10) {
+    if (curSec > 0 && (curSec - _lastSavedSecond).abs() >= 30) {
       _lastSavedSecond = curSec;
       _saveWatchedProgress(curSec);
     }
-    _updateNotification();
+    // Only rebuild UI when overlay controls are actually visible!
+    if (state.isOverlayVisible) {
+      emit(state.copyWith(position: event.position));
+    }
   }
 
   Future<void> _onUpdateDuration(
@@ -518,12 +578,14 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     if (event.duration.inSeconds == 0) {
       return;
     }
+
     _mediaService.audioHandler.add(MediaItem(
       id: _movie!.title,
       title: _movie!.title,
       artUri: Uri.parse(_movie!.imageUrl),
       duration: state.duration,
     ));
+
     _updateNotification();
   }
 
@@ -565,9 +627,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     Emitter<PlayerState> emit,
   ) async {
     if (isClosed) return;
-
     try {
-      _audioSession.setActive(false);
+      _audioSession?.setActive(false);
     } catch (_) {}
 
     try {
@@ -587,6 +648,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     } catch (_) {}
 
     _disposeMediaKit();
+
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
@@ -621,10 +683,11 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         ));
         return;
       }
+
       _player.pause();
       state.castFramework.castContext.sessionManager.remoteMediaClient.load(
           MediaLoadRequestData(
-              currentTime: state.position.inMilliseconds,
+              currentTime: _latestPosition.inMilliseconds,
               shouldAutoplay: true,
               mediaInfo: MediaInfo(
                   streamDuration: state.duration.inMilliseconds,
@@ -652,13 +715,15 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   }
 
   void _updateNotification() {
-    _mediaService.audioHandler.playbackState.add(PlaybackState(
-      playing: state.isPlaying,
-      updatePosition: state.position,
-      processingState: state.isBuffering
-          ? AudioProcessingState.buffering
-          : AudioProcessingState.ready,
-      bufferedPosition: state.duration,
-    ));
+    try {
+      _mediaService.audioHandler.playbackState.add(PlaybackState(
+        playing: state.isPlaying,
+        updatePosition: _latestPosition,
+        processingState: state.isBuffering
+            ? AudioProcessingState.buffering
+            : AudioProcessingState.ready,
+        bufferedPosition: state.duration,
+      ));
+    } catch (_) {}
   }
 }

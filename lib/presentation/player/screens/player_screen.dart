@@ -560,12 +560,17 @@ class _PlayerViewState extends State<PlayerView> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          Video(
-            controller: bloc.controller,
-            controls: NoVideoControls,
-            fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
+          RepaintBoundary(
+            child: Video(
+              controller: bloc.controller,
+              controls: NoVideoControls,
+              fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
+              wakelock: true,
+            ),
           ),
-          SafeArea(child: _buildOverlay(context, state)),
+          RepaintBoundary(
+            child: SafeArea(child: _buildOverlay(context, state)),
+          ),
         ],
       ),
     );
