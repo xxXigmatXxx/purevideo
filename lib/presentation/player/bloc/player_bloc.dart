@@ -32,6 +32,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   Timer? _hideControlsTimer;
   Timer? _seekingTimer;
   Timer? _debounceHideControlsTimer;
+  Timer? _bufferingDebounceTimer;
   VoidCallback? _castStateListener;
 
   final VideoSourceRepository _videoSourceRepository =
@@ -106,6 +107,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
+    _bufferingDebounceTimer?.cancel();
     if (_castStateListener != null) {
       try {
         state.castFramework.castContext.state
@@ -120,15 +122,26 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   Future<void> _initMediaKit() async {
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 64 * 1024 * 1024,
+        bufferSize: 128 * 1024 * 1024,
       ),
     );
     try {
       final dynamic nativePlayer = _player.platform;
       await nativePlayer.setProperty('hwdec', 'auto-safe');
+      await nativePlayer.setProperty('audio-channels', 'stereo');
+      await nativePlayer.setProperty('audio-buffer', '0.5');
       await nativePlayer.setProperty('cache', 'yes');
-      await nativePlayer.setProperty('demuxer-max-bytes', '67108864');
+      await nativePlayer.setProperty('cache-secs', '180');
+      await nativePlayer.setProperty('demuxer-readahead-secs', '180');
+      await nativePlayer.setProperty('demuxer-max-bytes', '134217728');
       await nativePlayer.setProperty('demuxer-max-back-bytes', '33554432');
+      await nativePlayer.setProperty('cache-pause', 'yes');
+      await nativePlayer.setProperty('cache-pause-initial', 'yes');
+      await nativePlayer.setProperty('cache-pause-wait', '5');
+      await nativePlayer.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,multiple_requests=1,http_persistent=1',
+      );
       await nativePlayer.setProperty('framedrop', 'vo');
       await nativePlayer.setProperty('vd-lavc-threads', '0');
     } catch (_) {}
@@ -162,8 +175,17 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     });
 
     _bufferingSubscription = _player.stream.buffering.listen((buffering) {
-      if (buffering != state.isBuffering) {
-        add(UpdateBufferingState(isBuffering: buffering));
+      _bufferingDebounceTimer?.cancel();
+      if (buffering) {
+        _bufferingDebounceTimer = Timer(const Duration(milliseconds: 900), () {
+          if (!isClosed && !state.isBuffering) {
+            add(const UpdateBufferingState(isBuffering: true));
+          }
+        });
+      } else {
+        if (state.isBuffering) {
+          add(const UpdateBufferingState(isBuffering: false));
+        }
       }
     });
   }
@@ -396,11 +418,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
       Future.delayed(const Duration(seconds: 6), () {
         if (!isClosed && state.isBuffering) {
-          emit(state.copyWith(
-            isBuffering: false,
-            isPlaying: true,
-            displayState: '',
-          ));
+          add(const UpdateBufferingState(isBuffering: false));
         }
       });
 
@@ -606,10 +624,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     } else {
       emit(state.copyWith(
         isBuffering: false,
-        isPlaying: true,
+        displayState: '',
       ));
     }
-    _updateNotification();
   }
 
   Future<void> _onPlayerError(
@@ -652,10 +669,12 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
+    _bufferingDebounceTimer?.cancel();
   }
 
   void _resetHideControlsTimer() {
     _debounceHideControlsTimer?.cancel();
+    _bufferingDebounceTimer?.cancel();
     _debounceHideControlsTimer = Timer(const Duration(milliseconds: 500), () {
       _hideControlsTimer?.cancel();
       _hideControlsTimer = Timer(const Duration(seconds: 3), () {
@@ -699,7 +718,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
               mediaInfo: MediaInfo(
                   streamDuration: state.duration.inMilliseconds,
                   streamType: StreamType.buffered,
-                  contentType: 'videos/mp4',
+                  contentType: state.selectedSource!.url.contains('.m3u8')
+                      ? 'application/x-mpegurl'
+                      : 'video/mp4',
                   contentId: state.selectedSource!.url,
                   customDataAsJson:
                       jsonEncode({'headers': state.selectedSource!.headers}),

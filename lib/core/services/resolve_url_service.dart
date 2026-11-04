@@ -110,10 +110,10 @@ class ResolveUrlService {
       final parsed = jsonDecode(finalJson);
       if (parsed is Map<String, dynamic>) return parsed;
     } catch (_) {}
-    return null;
+    return const [];
   }
 
-  Future<VideoSource?> _resolveDirectInDart(
+  Future<List<VideoSource>> _resolveDirectInDart(
       HostLink link, String cleanedUrl) async {
     try {
       var currentUrl = cleanedUrl;
@@ -139,7 +139,7 @@ class ResolveUrlService {
         break;
       }
 
-      if (html.isEmpty) return null;
+      if (html.isEmpty) return const [];
       final parsedUri = Uri.tryParse(currentUrl);
       final origin = parsedUri != null
           ? '${parsedUri.scheme}://${parsedUri.host}'
@@ -160,16 +160,84 @@ class ResolveUrlService {
           final hlsPath = vnMatch.group(1)!;
           final fullUrl =
               hlsPath.startsWith('http') ? hlsPath : '$origin$hlsPath';
-          return VideoSource(
-            url: fullUrl,
-            lang: link.lang,
-            quality: link.quality,
-            host: 'Vidneo',
-            headers: {
-              ...hdrs,
-              'Referer': currentUrl,
-            },
-          );
+          final vnHeaders = <String, String>{
+            ...hdrs,
+            'Referer': currentUrl,
+          };
+          try {
+            final masterResp = await _extDio.get<String>(
+              fullUrl,
+              options: Options(headers: vnHeaders),
+            );
+            final masterBody = masterResp.data ?? '';
+            if (masterBody.contains('#EXT-X-STREAM-INF')) {
+              var plAudio = 'a1';
+              final lines = masterBody.split(RegExp(r'\r?\n'));
+              for (final line in lines) {
+                if (line.startsWith('#EXT-X-MEDIA:TYPE=AUDIO') &&
+                    (line.toLowerCase().contains('language="pl"') ||
+                        line.toLowerCase().contains('name="polski"'))) {
+                  final am = RegExp(r'index-(a\d+)\.m3u8').firstMatch(line);
+                  if (am != null) {
+                    plAudio = am.group(1)!;
+                    break;
+                  }
+                }
+              }
+              final variants = <MapEntry<int, VideoSource>>[];
+              for (int i = 0; i < lines.length; i++) {
+                final line = lines[i].trim();
+                if (line.startsWith('#EXT-X-STREAM-INF')) {
+                  final resMatch =
+                      RegExp(r'RESOLUTION=(\d+)x(\d+)').firstMatch(line);
+                  final width =
+                      resMatch != null ? (int.tryParse(resMatch.group(1)!) ?? 0) : 0;
+                  final height =
+                      resMatch != null ? (int.tryParse(resMatch.group(2)!) ?? 0) : 0;
+                  final qual = (width >= 1900 || height >= 1000)
+                      ? '1080p'
+                      : ((width >= 1200 || height >= 700)
+                          ? '720p'
+                          : (link.quality.isNotEmpty ? link.quality : 'HD'));
+                  if (i + 1 < lines.length) {
+                    var subPath = lines[i + 1].trim();
+                    if (subPath.isNotEmpty && !subPath.startsWith('#')) {
+                      subPath = subPath.replaceAllMapped(
+                        RegExp(r'index-v(\d+)-a\d+\.m3u8'),
+                        (m) => 'index-v${m.group(1)}-$plAudio.m3u8',
+                      );
+                      final subUrl = subPath.startsWith('http')
+                          ? subPath
+                          : '$origin$subPath';
+                      variants.add(MapEntry(
+                        width,
+                        VideoSource(
+                          url: subUrl,
+                          lang: link.lang,
+                          quality: qual,
+                          host: 'Vidneo ($qual)',
+                          headers: vnHeaders,
+                        ),
+                      ));
+                    }
+                  }
+                }
+              }
+              if (variants.isNotEmpty) {
+                variants.sort((a, b) => a.key.compareTo(b.key));
+                return variants.map((e) => e.value).toList();
+              }
+            }
+          } catch (_) {}
+          return [
+            VideoSource(
+              url: fullUrl,
+              lang: link.lang,
+              quality: link.quality,
+              host: 'Vidneo',
+              headers: vnHeaders,
+            ),
+          ];
         }
       }
 
@@ -188,23 +256,23 @@ class ResolveUrlService {
               if (decoded != null) {
                 final src = decoded['source']?.toString();
                 if (src != null && src.startsWith('http')) {
-                  return VideoSource(
+                  return [VideoSource(
                     url: src,
                     lang: link.lang,
                     quality: link.quality,
                     host: 'VOE',
                     headers: hdrs,
-                  );
+                  )];
                 }
                 final dc = decoded['direct_access_url']?.toString();
                 if (dc != null && dc.startsWith('http')) {
-                  return VideoSource(
+                  return [VideoSource(
                     url: dc,
                     lang: link.lang,
                     quality: link.quality,
                     host: 'VOE',
                     headers: hdrs,
-                  );
+                  )];
                 }
               }
             }
@@ -224,13 +292,13 @@ class ResolveUrlService {
           } catch (_) {}
         }
         if (sUrl.startsWith('http')) {
-          return VideoSource(
+          return [VideoSource(
             url: sUrl,
             lang: link.lang,
             quality: link.quality,
             host: 'VOE',
             headers: hdrs,
-          );
+          )];
         }
       }
 
@@ -247,13 +315,13 @@ class ResolveUrlService {
                 .first
                 .toUpperCase() ??
             'DIRECT';
-        return VideoSource(
+        return [VideoSource(
           url: vUrl,
           lang: link.lang,
           quality: link.quality,
           host: hName,
           headers: hdrs,
-        );
+        )];
       }
 
       // 4. Streamtape: get_video?id=...
@@ -272,18 +340,18 @@ class ResolveUrlService {
             stUrl = 'https://streamtape.com$stUrl';
           }
           if (stUrl.startsWith('http')) {
-            return VideoSource(
+            return [VideoSource(
               url: stUrl,
               lang: link.lang,
               quality: link.quality,
               host: 'Streamtape',
               headers: hdrs,
-            );
+            )];
           }
         }
       }
     } catch (_) {}
-    return null;
+    return const [];
   }
 
   VideoSource _buildFallbackSource(HostLink u) {
@@ -330,8 +398,8 @@ class ResolveUrlService {
     final nativeSources = <VideoSource>[];
     final remainingUrls = <HostLink>[];
     for (int i = 0; i < unwrappedList.length; i++) {
-      if (dartResults[i] != null) {
-        nativeSources.add(dartResults[i]!);
+      if (dartResults[i].isNotEmpty) {
+        nativeSources.addAll(dartResults[i]);
       } else {
         remainingUrls.add(unwrappedList[i]);
       }
