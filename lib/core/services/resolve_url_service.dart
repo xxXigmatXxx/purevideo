@@ -110,7 +110,7 @@ class ResolveUrlService {
       final parsed = jsonDecode(finalJson);
       if (parsed is Map<String, dynamic>) return parsed;
     } catch (_) {}
-    return const [];
+    return null;
   }
 
   Future<List<VideoSource>> _resolveDirectInDart(
