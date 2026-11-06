@@ -11,7 +11,7 @@ class SettingsService {
   static const String _isDarkModeKey = 'isDarkMode';
   static const String _isSystemBrightnessKey = 'isSystemBrightness';
   static const String _myListKey = 'myListJson';
-  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v4';
+  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v5';
   static const String _linklessUrlsKey = 'linklessUrlsJson_v1';
   static const String _verifiedUrlsKey = 'verifiedUrlsJson_v1';
   static const String _uiStyleKey = 'uiStyle'; // 'netflix' or 'original'

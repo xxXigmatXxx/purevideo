@@ -295,14 +295,26 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
     }
     final isAdult = _isAdultCert(data);
     final genres = data['genres'];
-    if (genres is List && !isAdult) {
+    if (genres is List) {
       for (final g in genres) {
         if (g is Map) {
           final gName = (g['name'] ?? '').toString().toLowerCase().trim();
-          if (gName == 'animacja') {
+          if (gName == 'animacja' && !isAdult) {
             cats.add('Bajki dla dzieci');
-          } else if (gName == 'familijny') {
+          } else if (gName == 'familijny' && !isAdult) {
             cats.add('Familijne');
+          } else if (gName == 'akcja') {
+            cats.add('Akcja');
+          } else if (gName == 'komedia') {
+            cats.add('Komedia');
+          } else if (gName == 'horror') {
+            cats.add('Horror');
+          } else if (gName == 'thriller') {
+            cats.add('Thriller');
+          } else if (gName.contains('sci-fi') || gName.contains('scifi')) {
+            cats.add('Sci-Fi');
+          } else if (gName == 'dramat') {
+            cats.add('Dramat');
           }
         }
       }
@@ -311,10 +323,11 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
   }
 
   Future<List<ServiceMovieModel>> _fetchGenreChannel(
-      String path, String categoryLabel) async {
+      String path, String categoryLabel,
+      {bool filterAdult = false}) async {
     try {
       final resp =
-          await _dio!.get(path).timeout(const Duration(seconds: 12));
+          await _dio!.get(path).timeout(const Duration(seconds: 14));
       final bootstrapData = extractBootstrapData(resp.data);
       if (bootstrapData == null) return [];
       final items = bootstrapData['loaders']?['channelPage']?['channel']
@@ -322,7 +335,7 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
       if (items is! List) return [];
       return items
           .whereType<Map<String, dynamic>>()
-          .where((m) => !_isAdultCert(m))
+          .where((m) => !filterAdult || !_isAdultCert(m))
           .map((m) => _parseMovie(m, categoryLabel))
           .whereType<ServiceMovieModel>()
           .toList();
@@ -337,26 +350,50 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
 
     final results = await Future.wait([
       () async {
-        final response = await _dio!.get('/');
-        final bootstrapData = extractBootstrapData(response.data);
-        if (bootstrapData == null) return <ServiceMovieModel>[];
-        final channelData = bootstrapData['loaders']?['channelPage']?['channel']
-            ?['content']?['data'];
-        if (channelData is! List) return <ServiceMovieModel>[];
-        return channelData
-            .whereType<Map<String, dynamic>>()
-            .expand(_parseMoviesFromLoader)
-            .whereType<ServiceMovieModel>()
-            .toList();
+        try {
+          final response =
+              await _dio!.get('/').timeout(const Duration(seconds: 14));
+          final bootstrapData = extractBootstrapData(response.data);
+          if (bootstrapData == null) return <ServiceMovieModel>[];
+          final channelData = bootstrapData['loaders']?['channelPage']
+              ?['channel']?['content']?['data'];
+          if (channelData is! List) return <ServiceMovieModel>[];
+          return channelData
+              .whereType<Map<String, dynamic>>()
+              .expand(_parseMoviesFromLoader)
+              .whereType<ServiceMovieModel>()
+              .toList();
+        } catch (_) {
+          return <ServiceMovieModel>[];
+        }
       }(),
-      _fetchGenreChannel('/genre/animacja', 'Bajki dla dzieci'),
-      _fetchGenreChannel('/genre/familijny', 'Familijne'),
+      _fetchGenreChannel('/genre/animacja', 'Bajki dla dzieci',
+          filterAdult: true),
+      _fetchGenreChannel('/genre/familijny', 'Familijne', filterAdult: true),
+      _fetchGenreChannel('/movies', 'Popularne filmy'),
+      _fetchGenreChannel('/movies?page=2', 'Popularne filmy'),
+      _fetchGenreChannel('/series', 'Popularne seriale'),
+      _fetchGenreChannel('/genre/akcja', 'Akcja'),
+      _fetchGenreChannel('/genre/komedia', 'Komedia'),
+      _fetchGenreChannel('/genre/horror', 'Horror'),
+      _fetchGenreChannel('/genre/thriller', 'Thriller'),
+      _fetchGenreChannel('/genre/sci-fi', 'Sci-Fi'),
+      _fetchGenreChannel('/genre/dramat', 'Dramat'),
     ]);
 
     return [
       ...results[1],
       ...results[2],
       ...results[0],
+      ...results[3],
+      ...results[4],
+      ...results[5],
+      ...results[6],
+      ...results[7],
+      ...results[8],
+      ...results[9],
+      ...results[10],
+      ...results[11],
     ];
   }
 

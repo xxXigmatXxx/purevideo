@@ -1,9 +1,8 @@
-import 'package:purevideo/core/utils/safe_cookie.dart';
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:purevideo/core/services/webview_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/account_model.dart';
@@ -20,8 +19,26 @@ class EkinoAuthRepository implements AuthRepository {
   late StreamSubscription<AuthModel> _authSubscription;
 
   EkinoAuthRepository([AccountModel? account]) {
+    _dio = EkinoDioFactory.getDio(account);
     _loadSavedAccount();
     _authSubscription = _authController.stream.listen(_onAuthChanged);
+  }
+
+  List<Cookie> _parseCookiesFromSetCookieHeaders(List<String>? headers) {
+    if (headers == null || headers.isEmpty) return [];
+    final cookies = <Cookie>[];
+    for (final raw in headers) {
+      final lower = raw.toLowerCase();
+      if (lower.contains('max-age=0') || lower.contains('1970')) continue;
+      final firstPart = raw.split(';').first.trim();
+      final idx = firstPart.indexOf('=');
+      if (idx <= 0) continue;
+      final name = firstPart.substring(0, idx).trim();
+      final value = firstPart.substring(idx + 1).trim();
+      if (name.isEmpty || value.isEmpty || value == 'deleted') continue;
+      cookies.add(RawCookie(name, value));
+    }
+    return cookies;
   }
 
   Future<void> _loadSavedAccount() async {
@@ -34,30 +51,27 @@ class EkinoAuthRepository implements AuthRepository {
       if (accountJson != null) {
         _account = AccountModel.fromMap(jsonDecode(accountJson));
         _dio = EkinoDioFactory.getDio(_account);
+        _authController.add(
+          AuthModel(
+            service: SupportedService.ekino,
+            success: true,
+            account: _account,
+          ),
+        );
+        return;
+      }
 
-        try {
-          await _dio.get('/');
-          _authController.add(
-            AuthModel(
-              service: SupportedService.ekino,
-              success: true,
-              account: _account,
-            ),
-          );
-        } catch (e) {
-          await SecureStorageService.deleteServiceData(
-            SupportedService.ekino,
-            'account',
-          );
-          _account = null;
-          _account = null; _dio = EkinoDioFactory.getDio(null);
-        }
-      } else {
-        _account = null; _dio = EkinoDioFactory.getDio(null);
+      final loggedOut = await SecureStorageService.getServiceData(
+        SupportedService.ekino,
+        'logged_out',
+      );
+      if (loggedOut != 'true') {
+        await signIn({'anonymous': 'true'});
       }
     } catch (e) {
       debugPrint('Błąd podczas ładowania konta Ekino: $e');
-      _account = null; _dio = EkinoDioFactory.getDio(null);
+      _account = null;
+      _dio = EkinoDioFactory.getDio(null);
     }
   }
 
@@ -91,7 +105,6 @@ class EkinoAuthRepository implements AuthRepository {
           document.forms['login_fr'].login.value = '$login';
           document.forms['login_fr'].password.value = '$password';
           document.forms['login_fr'].querySelector("input[type='submit']").click();
-          // window.flutter_inappwebview.callHandler('messageHandler', element.outerHTML);
         });
       })();
     ''';
@@ -102,38 +115,31 @@ class EkinoAuthRepository implements AuthRepository {
     Map<String, String> fields,
   ) async {
     try {
+      await SecureStorageService.deleteServiceData(
+        SupportedService.ekino,
+        'logged_out',
+      );
       if (fields.containsKey('anonymous')) {
-        final response = await _dio.get(
-          '/',
-        );
-        if (true) {
-          final cookies = response.headers['set-cookie']
-                  ?.map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
-                  .toList() ??
-              [];
+        List<Cookie> cookies = [];
+        try {
+          final response = await _dio.get('/');
+          cookies = _parseCookiesFromSetCookieHeaders(
+              response.headers['set-cookie']);
+        } catch (_) {}
 
-          _account = AccountModel(
-            fields: {
-              'login': 'Gość',
-            },
-            cookies: cookies,
-            service: SupportedService.ekino,
-          );
-          final authModel = AuthModel(
-            service: SupportedService.ekino,
-            success: true,
-            account: _account,
-          );
-          _authController.add(authModel);
-          return authModel;
-        }
-        final authModel = AuthModel(
+        _account = AccountModel(
+          fields: {
+            'login': 'Gość',
+          },
+          cookies: cookies,
           service: SupportedService.ekino,
-          success: false,
-          error: ['Nie udało się zalogować jako gość'],
         );
-        _authController.add(authModel);
-        return authModel;
+        await setAccount(_account!);
+        return AuthModel(
+          service: SupportedService.ekino,
+          success: true,
+          account: _account,
+        );
       }
 
       final webviewLogin = await getIt<WebViewService>().executeJavaScript(
@@ -146,7 +152,13 @@ class EkinoAuthRepository implements AuthRepository {
           final cookieList = (json['cookies'] as String).split(';');
 
           final cookies = cookieList
-              .map((h) => h.trim()).where((h) => h.contains('=') && !h.startsWith('=')).map((h) => RawCookie(h.substring(0, h.indexOf('=')).trim(), h.substring(h.indexOf('=') + 1).trim()))
+              .map((h) => h.trim())
+              .where((h) => h.contains('=') && !h.startsWith('='))
+              .map((h) => RawCookie(
+                    h.substring(0, h.indexOf('=')).trim(),
+                    h.substring(h.indexOf('=') + 1).trim(),
+                  ))
+              .where((c) => c.value != 'deleted' && c.value.isNotEmpty)
               .toList();
 
           _account = AccountModel(
@@ -154,14 +166,12 @@ class EkinoAuthRepository implements AuthRepository {
             cookies: cookies,
             service: SupportedService.ekino,
           );
-
-          final authModel = AuthModel(
+          await setAccount(_account!);
+          return AuthModel(
             service: SupportedService.ekino,
             success: true,
             account: _account,
           );
-          _authController.add(authModel);
-          return authModel;
         } else {
           final authModel = AuthModel(
             service: SupportedService.ekino,
@@ -172,8 +182,6 @@ class EkinoAuthRepository implements AuthRepository {
           return authModel;
         }
       } catch (e) {
-        debugPrint('Błąd parsowania odpowiedzi logowania: $e');
-
         final authModel = AuthModel(
           service: SupportedService.ekino,
           success: false,
@@ -221,17 +229,22 @@ class EkinoAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     _account = null;
-    _account = null; _dio = EkinoDioFactory.getDio(null);
+    _dio = EkinoDioFactory.getDio(null);
+    await SecureStorageService.saveServiceData(
+      SupportedService.ekino,
+      'logged_out',
+      'true',
+    );
+    await SecureStorageService.deleteServiceData(
+      SupportedService.ekino,
+      'account',
+    );
     _authController.add(
       AuthModel(
         service: SupportedService.ekino,
         success: false,
         account: null,
       ),
-    );
-    await SecureStorageService.deleteServiceData(
-      SupportedService.ekino,
-      'account',
     );
   }
 

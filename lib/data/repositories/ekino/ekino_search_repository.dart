@@ -30,6 +30,24 @@ class EkinoSearchRepository extends SearchRepository {
     }
   }
 
+  String _cleanTitle(String raw) {
+    var t = raw.trim();
+    t = t.replaceFirst(
+      RegExp(
+        r'\s+-\s+(HD|CAM|4K|AI|PL|Lektor|Dubbing|Napisy).*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    if (t.contains(' / ')) {
+      final first = t.split(' / ').first.trim();
+      if (first.isNotEmpty) {
+        t = first;
+      }
+    }
+    return t.trim();
+  }
+
   @override
   Future<List<ServiceMovieModel>> searchMovies(String query) async {
     if (query.isEmpty) {
@@ -44,7 +62,6 @@ class EkinoSearchRepository extends SearchRepository {
     );
 
     final document = html.parse(response.data);
-
     final movies = <ServiceMovieModel>[];
 
     document.querySelectorAll('.movies-list-item').forEach((movieElement) {
@@ -63,10 +80,12 @@ class EkinoSearchRepository extends SearchRepository {
       final title = titleElement.text.trim();
       if (title.isEmpty) return;
 
-      final cleanTitle = title.split(' - ').first.trim();
+      final cleanTitle = _cleanTitle(title);
 
       String fullImageUrl = imageUrl;
-      if (imageUrl.startsWith('//')) { fullImageUrl = 'https:$imageUrl'; } else if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {
+      if (imageUrl.startsWith('//')) {
+        fullImageUrl = 'https:$imageUrl';
+      } else if (imageUrl.isNotEmpty && imageUrl.startsWith('/')) {
         fullImageUrl = 'https://ekino.ws$imageUrl';
       }
 
