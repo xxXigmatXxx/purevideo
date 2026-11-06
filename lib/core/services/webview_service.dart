@@ -163,7 +163,7 @@ class WebViewService {
     await ensureCleanUserAgent();
     final completer = Completer<dom.Element?>();
     executeJavaScript(url, _getJsCodeForElement(elementSelector),
-            timeoutSeconds: 22)
+            timeoutSeconds: 60)
         .then((result) {
       if (result != null && result.trim().isNotEmpty) {
         final document = dom.Document.html(result);

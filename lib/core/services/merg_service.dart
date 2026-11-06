@@ -32,31 +32,31 @@ class MergeService {
     return parts.isEmpty ? null : parts.join('|');
   }
 
-  Future<void> addFromService(List<ServiceMovieModel> movies) async {
-    if (movies.isEmpty) return;
+  void _mergeIntoList(List<ServiceMovieModel> movies, List<MovieModel> target) {
     for (final movie in movies) {
       final normalizedTitle = _normalizeTitle(movie.title);
-
-      final existingMovieIndex = _movies.indexWhere(
+      final existingMovieIndex = target.indexWhere(
         (existingMovie) =>
             _normalizeTitle(existingMovie.services.first.title) ==
             normalizedTitle,
       );
 
       if (existingMovieIndex != -1) {
-        final existingMovie = _movies[existingMovieIndex];
+        final existingMovie = target[existingMovieIndex];
         final existingSvcIdx = existingMovie.services.indexWhere(
           (service) => service.service == movie.service,
         );
 
         if (existingSvcIdx == -1) {
           final updatedServices = [...existingMovie.services, movie];
-          _movies[existingMovieIndex] = MovieModel(services: updatedServices);
+          target[existingMovieIndex] = MovieModel(services: updatedServices);
         } else {
           final oldSvc = existingMovie.services[existingSvcIdx];
-          final mergedCat = _mergeCategoryStrings(oldSvc.category, movie.category);
+          final mergedCat =
+              _mergeCategoryStrings(oldSvc.category, movie.category);
+          final updatedServices =
+              List<ServiceMovieModel>.from(existingMovie.services);
           if (mergedCat != oldSvc.category) {
-            final updatedServices = List<ServiceMovieModel>.from(existingMovie.services);
             updatedServices[existingSvcIdx] = ServiceMovieModel(
               service: oldSvc.service,
               url: oldSvc.url,
@@ -64,58 +64,32 @@ class MergeService {
               imageUrl: oldSvc.imageUrl,
               category: mergedCat,
             );
-            _movies[existingMovieIndex] = MovieModel(services: updatedServices);
           }
+          final sameServiceCount = updatedServices
+              .where((s) => s.service == movie.service)
+              .length;
+          final alreadyHasUrl =
+              updatedServices.any((s) => s.url == movie.url);
+          if (!alreadyHasUrl && sameServiceCount < 3) {
+            updatedServices.add(movie);
+          }
+          target[existingMovieIndex] = MovieModel(services: updatedServices);
         }
       } else {
-        _movies.add(MovieModel(services: [movie]));
+        target.add(MovieModel(services: [movie]));
       }
     }
+  }
+
+  Future<void> addFromService(List<ServiceMovieModel> movies) async {
+    if (movies.isEmpty) return;
+    _mergeIntoList(movies, _movies);
   }
 
   Future<List<MovieModel>> addFromServiceTemp(
       List<ServiceMovieModel> toAdd, List<MovieModel> existingMovies) async {
     if (toAdd.isEmpty) return [];
-    for (final movie in toAdd) {
-      final normalizedTitle = _normalizeTitle(movie.title);
-
-      final existingMovieIndex = existingMovies.indexWhere(
-        (existingMovie) =>
-            _normalizeTitle(existingMovie.services.first.title) ==
-            normalizedTitle,
-      );
-
-      if (existingMovieIndex != -1) {
-        final existingMovie = existingMovies[existingMovieIndex];
-        final existingSvcIdx = existingMovie.services.indexWhere(
-          (service) => service.service == movie.service,
-        );
-
-        if (existingSvcIdx == -1) {
-          final updatedServices = [...existingMovie.services, movie];
-          existingMovies[existingMovieIndex] =
-              MovieModel(services: updatedServices);
-        } else {
-          final oldSvc = existingMovie.services[existingSvcIdx];
-          final mergedCat = _mergeCategoryStrings(oldSvc.category, movie.category);
-          if (mergedCat != oldSvc.category) {
-            final updatedServices =
-                List<ServiceMovieModel>.from(existingMovie.services);
-            updatedServices[existingSvcIdx] = ServiceMovieModel(
-              service: oldSvc.service,
-              url: oldSvc.url,
-              title: oldSvc.title,
-              imageUrl: oldSvc.imageUrl,
-              category: mergedCat,
-            );
-            existingMovies[existingMovieIndex] =
-                MovieModel(services: updatedServices);
-          }
-        }
-      } else {
-        existingMovies.add(MovieModel(services: [movie]));
-      }
-    }
+    _mergeIntoList(toAdd, existingMovies);
     return existingMovies;
   }
 

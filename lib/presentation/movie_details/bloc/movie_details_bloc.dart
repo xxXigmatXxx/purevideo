@@ -21,6 +21,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
   final VideoSourceRepository _videoSourceRepository = getIt();
   final MergeService _mergeService = getIt();
   final WatchedService _watchedService = getIt();
+  List<ServiceMovieModel> _pendingEkinoEntries = const [];
 
   MovieDetailsBloc() : super(const MovieDetailsState()) {
     on<LoadMovieDetails>(_onLoadMovieDetails);
@@ -104,42 +105,55 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
     }
   }
 
+  Future<ServiceMovieDetailsModel?> _loadFirstValidEkinoDetails(
+      List<ServiceMovieModel> ekinoEntries) async {
+    final repo = _movieRepositories[SupportedService.ekino];
+    if (repo == null || ekinoEntries.isEmpty) return null;
+    ServiceMovieDetailsModel? fallbackDetails;
+    for (final ekinoMovie in ekinoEntries) {
+      try {
+        final d = await repo.getMovieDetails(ekinoMovie.url);
+        final fixed = d.copyWith(
+          title: (d.title.trim().isEmpty || d.title == 'Brak tytułu')
+              ? ekinoMovie.title
+              : d.title,
+          imageUrl: d.imageUrl.trim().isEmpty
+              ? ekinoMovie.imageUrl
+              : d.imageUrl,
+        );
+        fallbackDetails ??= fixed;
+        if (fixed.isSeries ||
+            (fixed.videoUrls != null && fixed.videoUrls!.isNotEmpty)) {
+          return fixed;
+        }
+      } catch (e) {
+        debugPrint('Error loading Ekino details (${ekinoMovie.url}): $e');
+      }
+    }
+    return fallbackDetails;
+  }
+
   Future<void> _onLoadMovieDetails(
       LoadMovieDetails event, Emitter<MovieDetailsState> emit) async {
     try {
       final services = <ServiceMovieDetailsModel>[];
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
-      // If movie has both Obejrzyj.to and Ekino, load Obejrzyj.to first so we don't hit Ekino's 6-gate quota unnecessarily
-      final hasObejrzyj = event.movie.services
-          .any((s) => s.service == SupportedService.obejrzyjto);
-      final primaryServices = hasObejrzyj
-          ? event.movie.services
-              .where((s) => s.service != SupportedService.ekino)
-              .toList()
-          : event.movie.services;
+      final ekinoEntries = event.movie.services
+          .where((s) => s.service == SupportedService.ekino)
+          .toList();
+      final nonEkinoEntries = event.movie.services
+          .where((s) => s.service != SupportedService.ekino)
+          .toList();
+      _pendingEkinoEntries = ekinoEntries;
 
-      for (final serivceMovie in primaryServices) {
+      for (final serivceMovie in nonEkinoEntries) {
         final authRepository = _authRepositories[serivceMovie.service];
-        if (authRepository == null) {
-          continue;
-        }
-
+        if (authRepository == null) continue;
         final account = authRepository.getAccount();
-        if (account == null) {
-          if (primaryServices.length == 1) {
-            return emit(state.copyWith(
-              errorMessage:
-                  'Nie jesteś zalogowany do ${serivceMovie.service.displayName}',
-            ));
-          }
-          continue;
-        }
-
+        if (account == null) continue;
         final movieRepository = _movieRepositories[serivceMovie.service];
-        if (movieRepository == null) {
-          continue;
-        }
+        if (movieRepository == null) continue;
 
         detailsFutures.add(() async {
           try {
@@ -159,37 +173,24 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           } catch (e) {
             debugPrint(
                 'Error loading details from ${serivceMovie.service}: $e');
-            if (primaryServices.length == 1) rethrow;
             return null;
           }
         }());
       }
 
-      services.addAll((await Future.wait(detailsFutures))
-          .whereType<ServiceMovieDetailsModel>());
+      if (detailsFutures.isNotEmpty) {
+        services.addAll((await Future.wait(detailsFutures))
+            .whereType<ServiceMovieDetailsModel>());
+      }
 
-      // Fallback to Ekino if primary service returned no videoUrls or failed
-      final hasAnyUrls = services
-          .any((s) => s.isSeries || (s.videoUrls != null && s.videoUrls!.isNotEmpty));
-      if (!hasAnyUrls && hasObejrzyj) {
-        final ekinoEntries = event.movie.services
-            .where((s) => s.service == SupportedService.ekino)
-            .toList();
-        for (final ekinoMovie in ekinoEntries) {
-          final repo = _movieRepositories[SupportedService.ekino];
-          if (repo != null) {
-            try {
-              final d = await repo.getMovieDetails(ekinoMovie.url);
-              services.add(d.copyWith(
-                title: (d.title.trim().isEmpty || d.title == 'Brak tytułu')
-                    ? ekinoMovie.title
-                    : d.title,
-                imageUrl: d.imageUrl.trim().isEmpty
-                    ? ekinoMovie.imageUrl
-                    : d.imageUrl,
-              ));
-            } catch (_) {}
-          }
+      // Load Ekino if there were no other services or if primary services returned no videoUrls
+      final hasAnyUrls = services.any(
+          (s) => s.isSeries || (s.videoUrls != null && s.videoUrls!.isNotEmpty));
+      if (!hasAnyUrls && ekinoEntries.isNotEmpty) {
+        final ekinoDetails = await _loadFirstValidEkinoDetails(ekinoEntries);
+        if (ekinoDetails != null) {
+          services.add(ekinoDetails);
+          _pendingEkinoEntries = const [];
         }
       }
 
@@ -198,14 +199,12 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       }
 
       final MovieDetailsModel movie = MovieDetailsModel(services: services);
-
       try {
         FirebaseAnalytics.instance
             .logSelectContent(contentType: 'video', itemId: movie.title);
       } catch (_) {}
 
       final watched = _watchedService.getByMovie(movie);
-
       emit(state.copyWith(watched: watched));
 
       if (movie.isSeries) {
@@ -216,7 +215,6 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
               .indexWhere((s) => s.number == lastWatchedSeason.number);
           if (idx >= 0) selectedSeasonIndex = idx;
         }
-
         emit(state.copyWith(
           movie: movie,
           selectedSeasonIndex: selectedSeasonIndex,
@@ -240,9 +238,37 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       ScrapeVideoUrls event, Emitter<MovieDetailsState> emit) async {
     try {
       if (!event.movie.isSeries) {
-        final updatedMovie = await _videoSourceRepository
+        var updatedMovie = await _videoSourceRepository
             .scrapeVideoUrls(event.movie)
-            .timeout(const Duration(seconds: 15), onTimeout: () => event.movie);
+            .timeout(const Duration(seconds: 22), onTimeout: () => event.movie);
+
+        // If primary service links failed to resolve and we still have unqueried Ekino entries, fallback to Ekino!
+        if ((updatedMovie.directUrls == null ||
+                updatedMovie.directUrls!.isEmpty) &&
+            _pendingEkinoEntries.isNotEmpty) {
+          final ekinoDetails =
+              await _loadFirstValidEkinoDetails(_pendingEkinoEntries);
+          _pendingEkinoEntries = const [];
+          if (ekinoDetails != null &&
+              ekinoDetails.videoUrls != null &&
+              ekinoDetails.videoUrls!.isNotEmpty) {
+            final combinedServices = [
+              ...updatedMovie.services,
+              ekinoDetails,
+            ];
+            final withEkino = MovieDetailsModel(
+              services: combinedServices,
+              filmwebInfo: updatedMovie.filmwebInfo,
+            );
+            updatedMovie = await _videoSourceRepository
+                .scrapeVideoUrls(withEkino)
+                .timeout(
+                  const Duration(seconds: 22),
+                  onTimeout: () => withEkino,
+                );
+          }
+        }
+
         emit(state.copyWith(movie: updatedMovie, isLoaded: true));
       }
     } catch (e) {

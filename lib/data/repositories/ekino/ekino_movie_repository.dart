@@ -34,6 +34,7 @@ class EkinoMovieRepository implements MovieRepository {
       getIt<Map<SupportedService, AuthRepository>>()[SupportedService.ekino]!;
   Dio? _dio;
   final Map<String, String> _sessionCookies = {};
+  bool _hasVerifiedTurnstileSession = false;
 
   static const Set<String> _deadHosts = {
     'upzone',
@@ -47,6 +48,13 @@ class EkinoMovieRepository implements MovieRepository {
     'vidtodo',
     'streamango',
     'vshare',
+    'ssb',
+    'streamsb',
+    'userload',
+    'abc',
+    'goo',
+    'upvid',
+    'just',
   };
 
   EkinoMovieRepository() {
@@ -88,7 +96,6 @@ class EkinoMovieRepository implements MovieRepository {
   void _applySessionCookiesToDio() {
     if (_dio == null) return;
     _dio!.options.headers['User-Agent'] = WebViewService.cleanUserAgent;
-    if (_sessionCookies.isEmpty) return;
     final existing = (_dio!.options.headers['Cookie']?.toString() ?? '').trim();
     final map = <String, String>{};
     if (existing.isNotEmpty) {
@@ -98,14 +105,21 @@ class EkinoMovieRepository implements MovieRepository {
           final k = part.substring(0, idx).trim();
           final v = part.substring(idx + 1).trim();
           if (k.isNotEmpty && v.isNotEmpty && v != 'deleted') {
+            if (k.toUpperCase() == 'PHPSESSID' && !_hasVerifiedTurnstileSession) {
+              continue;
+            }
             map[k] = v;
           }
         }
       }
     }
     map.addAll(_sessionCookies);
-    _dio!.options.headers['Cookie'] =
-        map.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    if (map.isEmpty) {
+      _dio!.options.headers.remove('Cookie');
+    } else {
+      _dio!.options.headers['Cookie'] =
+          map.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    }
   }
 
   Future<void> _syncCookiesFromWebView() async {
@@ -117,6 +131,9 @@ class EkinoMovieRepository implements MovieRepository {
             c.value.isNotEmpty &&
             c.value != 'deleted') {
           _sessionCookies[c.name] = c.value;
+          if (c.name.toUpperCase() == 'PHPSESSID') {
+            _hasVerifiedTurnstileSession = true;
+          }
         }
       }
       _applySessionCookiesToDio();
@@ -140,7 +157,8 @@ class EkinoMovieRepository implements MovieRepository {
             _sessionCookies.remove(name);
             continue;
           }
-          if (name == 'PHPSESSID' && _sessionCookies.containsKey('PHPSESSID')) {
+          // Do not save unverified PHPSESSID from normal GETs — it forces Turnstile early!
+          if (name.toUpperCase() == 'PHPSESSID') {
             continue;
           }
           if (name.isNotEmpty && value.isNotEmpty) {
@@ -162,25 +180,28 @@ class EkinoMovieRepository implements MovieRepository {
 
   int _hostPriority(String host) {
     final h = host.toLowerCase().trim();
-    if (h == 'voe') return 1;
-    if (h == 'shvid') return 2;
-    if (h == 'wrzucaj' || h == 'vidoza') return 3;
-    if (h == 'file1' || h == 'vmoly') return 4;
+    // "player" is Ekino's first-party 1080p Byse server (mfw09.org), live on 95%+ of titles!
+    if (h == 'player') return 1;
+    if (h == 'savef') return 2;
+    if (h == 'shvid') return 3;
+    if (h == 'wrzucaj' || h == 'vidoza') return 4;
     if (h == 'dood') return 5;
-    if (h == 'mix') return 6;
-    if (h == 'player') return 7;
-    return 8;
+    if (h == 'voe') return 6;
+    if (h == 'file1' || h == 'vmoly') return 7;
+    if (h == 'mix') return 8;
+    return 9;
   }
 
   Future<List<HostLink>> _extractHostLinksFromDocument(
-      dom.Document document) async {
+    dom.Document document, {
+    String? pageUrl,
+  }) async {
     final videoUrls = <HostLink>[];
-
     final tabPanes =
         document.querySelectorAll('.tab-content .tab-pane[role="tabpanel"]');
     final playerTabs = document.querySelectorAll('#myTab li');
 
-    final candidates = <_EkinoTabCandidate>[];
+    final rawCandidates = <_EkinoTabCandidate>[];
 
     for (int i = 0; i < tabPanes.length && i < playerTabs.length; i++) {
       final tabPane = tabPanes[i];
@@ -191,7 +212,6 @@ class EkinoMovieRepository implements MovieRepository {
 
       final onclickLink = tabPane.querySelector('a[onclick]');
       if (onclickLink == null) continue;
-
       final onclick = onclickLink.attributes['onclick'] ?? '';
       if (onclick.isEmpty) continue;
 
@@ -213,7 +233,7 @@ class EkinoMovieRepository implements MovieRepository {
       final qualityIcon = playerTab.querySelector('img');
       final quality = qualityIcon?.attributes['title']?.trim() ?? 'HD';
 
-      candidates.add(_EkinoTabCandidate(
+      rawCandidates.add(_EkinoTabCandidate(
         hostName: hostName,
         hostId: hostId,
         language: language,
@@ -222,22 +242,51 @@ class EkinoMovieRepository implements MovieRepository {
       ));
     }
 
-    candidates.sort((a, b) => a.priority.compareTo(b.priority));
+    rawCandidates.sort((a, b) => a.priority.compareTo(b.priority));
+
+    // Deduplicate primary pass by hostName so we never waste gate unlocks on 2 identical dead tabs
+    final seenHosts = <String>{};
+    final uniqueHostCandidates = <_EkinoTabCandidate>[];
+    final duplicateHostCandidates = <_EkinoTabCandidate>[];
+    for (final c in rawCandidates) {
+      if (seenHosts.add(c.hostName.toLowerCase())) {
+        uniqueHostCandidates.add(c);
+      } else {
+        duplicateHostCandidates.add(c);
+      }
+    }
+    final candidates = [
+      ...uniqueHostCandidates,
+      ...duplicateHostCandidates,
+    ];
 
     bool turnstileAttempted = false;
     bool turnstileCancelled = false;
     int gatesQueried = 0;
+    final refererUrl = (pageUrl != null && pageUrl.isNotEmpty)
+        ? (pageUrl.startsWith('http')
+            ? pageUrl
+            : '${SupportedService.ekino.baseUrl}$pageUrl')
+        : '${SupportedService.ekino.baseUrl}/';
 
     for (final cand in candidates) {
       if (turnstileCancelled) break;
-      if (videoUrls.length >= 2 || gatesQueried >= 2) break;
+      if (videoUrls.length >= 2 || gatesQueried >= 3) break;
+      // If we already got a live 1st-party mfw09/byse link, conserve gate quota unless session is verified
+      if (videoUrls.any((v) =>
+              v.url.contains('mfw09.') || v.url.contains('byse')) &&
+          (!_hasVerifiedTurnstileSession || videoUrls.length >= 2)) {
+        break;
+      }
       gatesQueried++;
 
       final gateUrl = '/watch/f/${cand.hostName}/${cand.hostId}';
       String? videoUrl;
-
       try {
-        final gateResp = await _dio!.get(gateUrl);
+        final gateResp = await _dio!.get(
+          gateUrl,
+          options: Options(headers: {'Referer': refererUrl}),
+        );
         _saveSetCookiesFromResponse(gateResp);
         final gateDoc = html.parse(gateResp.data);
         videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ??
@@ -248,6 +297,8 @@ class EkinoMovieRepository implements MovieRepository {
             videoUrls.isEmpty) {
           turnstileAttempted = true;
           _sessionCookies.remove('PHPSESSID');
+          _hasVerifiedTurnstileSession = false;
+          _applySessionCookiesToDio();
           final elem = await getIt<WebViewService>().waitForDomElement(
             '${SupportedService.ekino.baseUrl}$gateUrl',
             'a.buttonprch',
@@ -310,10 +361,15 @@ class EkinoMovieRepository implements MovieRepository {
   @override
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     await _prepareDio();
+
     final episodeResponse = await _dio!.get(episode.url);
     _saveSetCookiesFromResponse(episodeResponse);
     final document = html.parse(episodeResponse.data);
-    final videoUrls = await _extractHostLinksFromDocument(document);
+
+    final videoUrls = await _extractHostLinksFromDocument(
+      document,
+      pageUrl: episode.url,
+    );
 
     return episode.copyWith(
       videoUrls: videoUrls,
@@ -334,7 +390,6 @@ class EkinoMovieRepository implements MovieRepository {
 
     final descriptionElement = document.querySelector('.descriptionMovie');
     String description = descriptionElement?.text.trim() ?? '';
-
     final lines = description.split('\n');
     final cleanLines = <String>[];
     for (final line in lines) {
@@ -417,7 +472,10 @@ class EkinoMovieRepository implements MovieRepository {
       );
     }
 
-    final videoUrls = await _extractHostLinksFromDocument(document);
+    final videoUrls = await _extractHostLinksFromDocument(
+      document,
+      pageUrl: url,
+    );
     debugPrint('Extracted Ekino video URLs: $videoUrls');
 
     return ServiceMovieDetailsModel(

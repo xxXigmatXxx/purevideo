@@ -156,18 +156,18 @@ class ResolveUrlService {
 
 
 
-  // Register-inlined zero-allocation PoW worker executed inside a background Isolate!
-  static String _solveBysePowInIsolate(String nonce, int difficulty) {
+  // Register-inlined zero-allocation PoW worker executed inside background Isolates!
+  static String? _solveBysePowWorker(
+      String nonce, int difficulty, int start, int step) {
     if (difficulty <= 0) return '0';
     final prefixUnits = '$nonce:'.codeUnits;
     int init0 = 1779033703;
     int init1 = 3144134277;
     int init2 = 1013904242;
     int init3 = 2773480762;
-
     for (int i = 0; i < prefixUnits.length; i++) {
       init0 = (init0 + (prefixUnits[i] & 0xff)) & 0xFFFFFFFF;
-      init0 = (((init0 << 7) | (init0 >>> 25))) & 0xFFFFFFFF;
+      init0 = ((init0 << 7) | (init0 >>> 25)) & 0xFFFFFFFF;
       init0 = (init0 + init1) & 0xFFFFFFFF;
       init3 = (((init3 ^ init0) << 16) | ((init3 ^ init0) >>> 16)) & 0xFFFFFFFF;
       init2 = (init2 + init3) & 0xFFFFFFFF;
@@ -177,11 +177,11 @@ class ResolveUrlService {
       init2 = (init2 + init3) & 0xFFFFFFFF;
       init1 = (((init1 ^ init2) << 7) | ((init1 ^ init2) >>> 25)) & 0xFFFFFFFF;
     }
-
     final r = Uint32List(512);
     final digits = Uint8List(12);
+    final limit = 1 << (32 - difficulty);
 
-    for (int s = 0; s < 220000; s++) {
+    for (int s = start; s < 400000; s += step) {
       int dLen = 0;
       if (s == 0) {
         digits[0] = 48;
@@ -193,90 +193,100 @@ class ResolveUrlService {
           tmp ~/= 10;
         }
       }
-
       int e0 = init0;
       int e1 = init1;
       int e2 = init2;
       int e3 = init3;
-
       for (int i = dLen - 1; i >= 0; i--) {
         e0 = (e0 + digits[i]) & 0xFFFFFFFF;
         e0 = ((e0 << 7) | (e0 >>> 25)) & 0xFFFFFFFF;
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 16) | (e3 >>> 16)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 12) | (e1 >>> 20)) & 0xFFFFFFFF;
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 8) | (e3 >>> 24)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 7) | (e1 >>> 25)) & 0xFFFFFFFF;
       }
-
       for (int i = 0; i < 8; i++) {
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 16) | (e3 >>> 16)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 12) | (e1 >>> 20)) & 0xFFFFFFFF;
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 8) | (e3 >>> 24)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 7) | (e1 >>> 25)) & 0xFFFFFFFF;
       }
-
       for (int i = 0; i < 512; i++) {
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 16) | (e3 >>> 16)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 12) | (e1 >>> 20)) & 0xFFFFFFFF;
         e0 = (e0 + e1) & 0xFFFFFFFF;
-        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e3 = (e3 ^ e0) & 0xFFFFFFFF;
+        e3 = ((e3 << 8) | (e3 >>> 24)) & 0xFFFFFFFF;
         e2 = (e2 + e3) & 0xFFFFFFFF;
-        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
-        r[i] = (e0 ^ e2) & 0xFFFFFFFF;
+        e1 = (e1 ^ e2) & 0xFFFFFFFF;
+        e1 = ((e1 << 7) | (e1 >>> 25)) & 0xFFFFFFFF;
+        r[i] = e0 ^ e2;
       }
-
       for (int pass = 0; pass < 2; pass++) {
         for (int idx = 0; idx < 512; idx++) {
           final a = r[idx] & 511;
           int c = (r[idx] + r[a]) & 0xFFFFFFFF;
-          c = ((c << 13) | (c >>> 19)) & 0xFFFFFFFF;
-          c = (c ^ ((r[(idx + 1) & 511] * 2654435761) & 0xFFFFFFFF)) & 0xFFFFFFFF;
+          c = ((c << 13) | (c >>> 19)) ^ (r[(idx + 1) & 511] * 2654435761);
           r[idx] = c;
-          e0 = (e0 ^ c) & 0xFFFFFFFF;
+          e0 = (e0 ^ r[idx]) & 0xFFFFFFFF;
           e0 = (e0 + e1) & 0xFFFFFFFF;
-          e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+          e3 = (e3 ^ e0) & 0xFFFFFFFF;
+          e3 = ((e3 << 16) | (e3 >>> 16)) & 0xFFFFFFFF;
           e2 = (e2 + e3) & 0xFFFFFFFF;
-          e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+          e1 = (e1 ^ e2) & 0xFFFFFFFF;
+          e1 = ((e1 << 12) | (e1 >>> 20)) & 0xFFFFFFFF;
           e0 = (e0 + e1) & 0xFFFFFFFF;
-          e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+          e3 = (e3 ^ e0) & 0xFFFFFFFF;
+          e3 = ((e3 << 8) | (e3 >>> 24)) & 0xFFFFFFFF;
           e2 = (e2 + e3) & 0xFFFFFFFF;
-          e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+          e1 = (e1 ^ e2) & 0xFFFFFFFF;
+          e1 = ((e1 << 7) | (e1 >>> 25)) & 0xFFFFFFFF;
         }
       }
-
       e0 = (e0 + e1) & 0xFFFFFFFF;
-      e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+      e3 = (e3 ^ e0) & 0xFFFFFFFF;
+      e3 = ((e3 << 16) | (e3 >>> 16)) & 0xFFFFFFFF;
       e2 = (e2 + e3) & 0xFFFFFFFF;
-      e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+      e1 = (e1 ^ e2) & 0xFFFFFFFF;
+      e1 = ((e1 << 12) | (e1 >>> 20)) & 0xFFFFFFFF;
       e0 = (e0 + e1) & 0xFFFFFFFF;
-      e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+      e3 = (e3 ^ e0) & 0xFFFFFFFF;
+      e3 = ((e3 << 8) | (e3 >>> 24)) & 0xFFFFFFFF;
       e2 = (e2 + e3) & 0xFFFFFFFF;
-      e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
-
+      e1 = (e1 ^ e2) & 0xFFFFFFFF;
+      e1 = ((e1 << 7) | (e1 >>> 25)) & 0xFFFFFFFF;
       int st = e0;
       for (int c = 0; c < 64; c++) {
         final d = r[c];
         st = (st + d) & 0xFFFFFFFF;
-        st = ((st << 5) | (st >>> 27)) & 0xFFFFFFFF;
-        st = (st ^ ((d * 2246822519) & 0xFFFFFFFF)) & 0xFFFFFFFF;
+        st = (((st << 5) | (st >>> 27)) ^ (d * 2246822519)) & 0xFFFFFFFF;
       }
       final w0 = (st ^ e2) & 0xFFFFFFFF;
-      final leadingZeros = w0 == 0 ? 32 : (32 - w0.bitLength);
-      if (leadingZeros >= difficulty) {
+      if (w0 < limit) {
         return s.toString();
       }
     }
-    return '0';
+    return null;
   }
 
   ResolveUrlService(this._dio) {
@@ -489,10 +499,22 @@ class ResolveUrlService {
           final diff = (capJson['pow_difficulty'] as num?)?.toInt() ?? 12;
           final powToken = (capJson['pow_token'] ?? '').toString();
           if (nonce.isNotEmpty && powToken.isNotEmpty) {
-            // Solve PoW on a background isolate so the main UI thread never freezes!
-            final solution = await Isolate.run(
-              () => _solveBysePowInIsolate(nonce, diff),
-            ).timeout(const Duration(seconds: 4), onTimeout: () => '0');
+            // Solve PoW across 2 parallel background isolates so the main UI thread never freezes!
+            final c = Completer<String>();
+            for (int w = 0; w < 2; w++) {
+              final workerStart = w;
+              Isolate.run(
+                () => _solveBysePowWorker(nonce, diff, workerStart, 2),
+              ).then((ans) {
+                if (ans != null && !c.isCompleted) {
+                  c.complete(ans);
+                }
+              }).catchError((_) {});
+            }
+            final solution = await c.future.timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => '0',
+            );
 
             final verResp = await _extDio.post<String>(
               '$origin/api/videos/$code/embed/captcha/verify',
