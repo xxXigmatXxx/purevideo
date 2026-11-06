@@ -123,11 +123,10 @@ class EkinoMovieRepository implements MovieRepository {
     } catch (_) {}
   }
 
-  Future<void> _saveSetCookiesFromResponse(Response response) async {
+  void _saveSetCookiesFromResponse(Response response) {
     try {
       final setCookies = response.headers['set-cookie'];
       if (setCookies == null || setCookies.isEmpty) return;
-      final cm = CookieManager.instance();
       for (final sc in setCookies) {
         final lower = sc.toLowerCase();
         final firstPart = sc.split(';').first.trim();
@@ -146,12 +145,6 @@ class EkinoMovieRepository implements MovieRepository {
           }
           if (name.isNotEmpty && value.isNotEmpty) {
             _sessionCookies[name] = value;
-            await cm.setCookie(
-              url: WebUri('https://ekino.ws'),
-              name: name,
-              value: value,
-              path: '/',
-            );
           }
         }
       }
@@ -160,23 +153,22 @@ class EkinoMovieRepository implements MovieRepository {
   }
 
   Future<void> _prepareDio() async {
-    await WebViewService.ensureCleanUserAgent();
     _dio ??= EkinoDioFactory.getDio(
       _authRepository.getAccount(),
     );
     _dio!.options.headers['User-Agent'] = WebViewService.cleanUserAgent;
-    await _syncCookiesFromWebView();
+    _applySessionCookiesToDio();
   }
 
   int _hostPriority(String host) {
     final h = host.toLowerCase().trim();
     if (h == 'voe') return 1;
-    if (h == 'player') return 2;
-    if (h == 'shvid') return 3;
-    if (h == 'wrzucaj' || h == 'vidoza') return 4;
-    if (h == 'file1' || h == 'vmoly') return 5;
-    if (h == 'dood') return 6;
-    if (h == 'mix') return 7;
+    if (h == 'shvid') return 2;
+    if (h == 'wrzucaj' || h == 'vidoza') return 3;
+    if (h == 'file1' || h == 'vmoly') return 4;
+    if (h == 'dood') return 5;
+    if (h == 'mix') return 6;
+    if (h == 'player') return 7;
     return 8;
   }
 
@@ -238,7 +230,7 @@ class EkinoMovieRepository implements MovieRepository {
 
     for (final cand in candidates) {
       if (turnstileCancelled) break;
-      if (videoUrls.length >= 2 || gatesQueried >= 3) break;
+      if (videoUrls.length >= 2 || gatesQueried >= 2) break;
       gatesQueried++;
 
       final gateUrl = '/watch/f/${cand.hostName}/${cand.hostId}';
@@ -246,7 +238,7 @@ class EkinoMovieRepository implements MovieRepository {
 
       try {
         final gateResp = await _dio!.get(gateUrl);
-        await _saveSetCookiesFromResponse(gateResp);
+        _saveSetCookiesFromResponse(gateResp);
         final gateDoc = html.parse(gateResp.data);
         videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ??
             gateDoc.querySelector('a[href*="play.ekino"]')?.attributes['href'];
@@ -282,8 +274,8 @@ class EkinoMovieRepository implements MovieRepository {
               'Referer': '${SupportedService.ekino.baseUrl}$gateUrl',
               if (cookieHdr.isNotEmpty) 'Cookie': cookieHdr,
             },
-            connectTimeout: const Duration(seconds: 7),
-            receiveTimeout: const Duration(seconds: 7),
+            connectTimeout: const Duration(seconds: 6),
+            receiveTimeout: const Duration(seconds: 6),
             validateStatus: (_) => true,
           )).get(videoUrl);
           final linkDoc = html.parse(linkResp.data);
@@ -319,7 +311,7 @@ class EkinoMovieRepository implements MovieRepository {
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     await _prepareDio();
     final episodeResponse = await _dio!.get(episode.url);
-    await _saveSetCookiesFromResponse(episodeResponse);
+    _saveSetCookiesFromResponse(episodeResponse);
     final document = html.parse(episodeResponse.data);
     final videoUrls = await _extractHostLinksFromDocument(document);
 
@@ -333,7 +325,7 @@ class EkinoMovieRepository implements MovieRepository {
     await _prepareDio();
 
     final response = await _dio!.get(url);
-    await _saveSetCookiesFromResponse(response);
+    _saveSetCookiesFromResponse(response);
     final document = html.parse(response.data);
 
     final titleElement = document.querySelector('h1.title');
@@ -444,7 +436,7 @@ class EkinoMovieRepository implements MovieRepository {
     try {
       final resp =
           await _dio!.get(path).timeout(const Duration(seconds: 12));
-      await _saveSetCookiesFromResponse(resp);
+      _saveSetCookiesFromResponse(resp);
       final doc = html.parse(resp.data);
       final list = <ServiceMovieModel>[];
       for (final movieElement in doc.querySelectorAll('.movies-list-item')) {
@@ -482,7 +474,7 @@ class EkinoMovieRepository implements MovieRepository {
         try {
           final response =
               await _dio!.get('/').timeout(const Duration(seconds: 12));
-          await _saveSetCookiesFromResponse(response);
+          _saveSetCookiesFromResponse(response);
           final document = html.parse(response.data);
           final movies = <ServiceMovieModel>[];
           final movieSections = document.querySelectorAll('.mostPopular');

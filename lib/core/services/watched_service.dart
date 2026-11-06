@@ -59,7 +59,7 @@ class WatchedService {
         final w = entry.value;
         final validServices = w.movie.services
             .where((s) =>
-                s.service != SupportedService.ekino &&
+                
                 s.url.trim().isNotEmpty &&
                 s.title.trim().isNotEmpty &&
                 s.title.trim() != 'Brak tytułu' &&
@@ -94,7 +94,7 @@ class WatchedService {
 
     final sanitizedServices = movie.services
         .where((s) =>
-            s.service != SupportedService.ekino && s.url.trim().isNotEmpty)
+             s.url.trim().isNotEmpty)
         .map((s) {
           final cleanTitle =
               (s.title.trim().isEmpty || s.title.trim() == 'Brak tytułu') &&

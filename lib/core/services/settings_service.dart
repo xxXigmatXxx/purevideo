@@ -11,7 +11,7 @@ class SettingsService {
   static const String _isDarkModeKey = 'isDarkMode';
   static const String _isSystemBrightnessKey = 'isSystemBrightness';
   static const String _myListKey = 'myListJson';
-  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v6';
+  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v7';
   static const String _linklessUrlsKey = 'linklessUrlsJson_v1';
   static const String _verifiedUrlsKey = 'verifiedUrlsJson_v1';
   static const String _uiStyleKey = 'uiStyle'; // 'netflix' or 'original'
@@ -52,7 +52,7 @@ class SettingsService {
             final services = ((item['services'] as List?) ?? [])
                 .map((s) {
                   final sName = s['service']?.toString() ?? '';
-                  if (sName == 'ekino') return null;
+                  
                   final url = s['url']?.toString().trim() ?? '';
                   final title = s['title']?.toString().trim() ?? '';
                   final imageUrl = s['imageUrl']?.toString().trim() ?? '';
@@ -88,7 +88,7 @@ class SettingsService {
       final encoded = jsonEncode(movies
           .map((m) => {
                 'services': m.services
-                    .where((s) => s.service != SupportedService.ekino)
+                    
                     .map((s) => {
                           'service': s.service.name,
                           'url': s.url,
@@ -138,7 +138,7 @@ class SettingsService {
             final services = ((item['services'] as List?) ?? [])
                 .map((s) {
                   final sName = s['service']?.toString() ?? '';
-                  if (sName == 'ekino') return null;
+                  
                   return ServiceMovieModel(
                     service: SupportedService.values.firstWhere(
                       (e) => e.name == sName,

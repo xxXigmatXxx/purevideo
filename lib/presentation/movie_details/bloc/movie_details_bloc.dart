@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:diacritic/diacritic.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,24 +22,12 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
   final MergeService _mergeService = getIt();
   final WatchedService _watchedService = getIt();
 
-  static final _nonWordRegex = RegExp(r'[^\w\s]');
-  static final _spacesRegex = RegExp(r'\s+');
-
   MovieDetailsBloc() : super(const MovieDetailsState()) {
     on<LoadMovieDetails>(_onLoadMovieDetails);
     on<LoadFilmwebMovieDetails>(_onLoadFilmwebMovieDetails);
     on<ScrapeVideoUrls>(_onScrapeVideoUrls);
     on<SelectSeason>(_onSelectSeason);
     on<UpdateWatchedStatus>(_onUpdateWatchedStatus);
-  }
-
-  String _normTitle(String title) {
-    return removeDiacritics(title
-        .toLowerCase()
-        .trim()
-        .replaceAll(_nonWordRegex, '')
-        .replaceAll(_spacesRegex, '')
-        .trim());
   }
 
   Future<void> _onLoadFilmwebMovieDetails(
@@ -120,48 +107,19 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
   Future<void> _onLoadMovieDetails(
       LoadMovieDetails event, Emitter<MovieDetailsState> emit) async {
     try {
-      final candidateServices =
-          List<ServiceMovieModel>.from(event.movie.services);
-      final existingTypes = candidateServices.map((s) => s.service).toSet();
-      final baseTitle = event.movie.title.trim();
-      final normBase = _normTitle(baseTitle);
-
-      // Cross-search other logged-in services (e.g. Ekino <-> Obejrzyj.to) so every movie gets all available sources
-      if (baseTitle.isNotEmpty && normBase.isNotEmpty) {
-        final missingSearchEntries = _searchRepositories.entries
-            .where((entry) =>
-                !existingTypes.contains(entry.key) &&
-                _authRepositories[entry.key]?.getAccount() != null)
-            .toList();
-
-        if (missingSearchEntries.isNotEmpty) {
-          final extraLists = await Future.wait(
-            missingSearchEntries.map((entry) async {
-              try {
-                return await entry.value
-                    .searchMovies(baseTitle)
-                    .timeout(const Duration(seconds: 5), onTimeout: () => []);
-              } catch (_) {
-                return <ServiceMovieModel>[];
-              }
-            }),
-          );
-          for (final list in extraLists) {
-            for (final item in list) {
-              if (_normTitle(item.title) == normBase &&
-                  !candidateServices.any((s) => s.service == item.service)) {
-                candidateServices.add(item);
-                break;
-              }
-            }
-          }
-        }
-      }
-
       final services = <ServiceMovieDetailsModel>[];
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
-      for (final serivceMovie in candidateServices) {
+      // If movie has both Obejrzyj.to and Ekino, load Obejrzyj.to first so we don't hit Ekino's 6-gate quota unnecessarily
+      final hasObejrzyj = event.movie.services
+          .any((s) => s.service == SupportedService.obejrzyjto);
+      final primaryServices = hasObejrzyj
+          ? event.movie.services
+              .where((s) => s.service != SupportedService.ekino)
+              .toList()
+          : event.movie.services;
+
+      for (final serivceMovie in primaryServices) {
         final authRepository = _authRepositories[serivceMovie.service];
         if (authRepository == null) {
           continue;
@@ -169,7 +127,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
         final account = authRepository.getAccount();
         if (account == null) {
-          if (candidateServices.length == 1) {
+          if (primaryServices.length == 1) {
             return emit(state.copyWith(
               errorMessage:
                   'Nie jesteś zalogowany do ${serivceMovie.service.displayName}',
@@ -201,7 +159,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           } catch (e) {
             debugPrint(
                 'Error loading details from ${serivceMovie.service}: $e');
-            if (candidateServices.length == 1) rethrow;
+            if (primaryServices.length == 1) rethrow;
             return null;
           }
         }());
@@ -209,6 +167,31 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
       services.addAll((await Future.wait(detailsFutures))
           .whereType<ServiceMovieDetailsModel>());
+
+      // Fallback to Ekino if primary service returned no videoUrls or failed
+      final hasAnyUrls = services
+          .any((s) => s.isSeries || (s.videoUrls != null && s.videoUrls!.isNotEmpty));
+      if (!hasAnyUrls && hasObejrzyj) {
+        final ekinoEntries = event.movie.services
+            .where((s) => s.service == SupportedService.ekino)
+            .toList();
+        for (final ekinoMovie in ekinoEntries) {
+          final repo = _movieRepositories[SupportedService.ekino];
+          if (repo != null) {
+            try {
+              final d = await repo.getMovieDetails(ekinoMovie.url);
+              services.add(d.copyWith(
+                title: (d.title.trim().isEmpty || d.title == 'Brak tytułu')
+                    ? ekinoMovie.title
+                    : d.title,
+                imageUrl: d.imageUrl.trim().isEmpty
+                    ? ekinoMovie.imageUrl
+                    : d.imageUrl,
+              ));
+            } catch (_) {}
+          }
+        }
+      }
 
       if (services.isEmpty) {
         throw Exception('Nie udało się pobrać szczegółów z żadnego serwisu');
@@ -259,7 +242,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       if (!event.movie.isSeries) {
         final updatedMovie = await _videoSourceRepository
             .scrapeVideoUrls(event.movie)
-            .timeout(const Duration(seconds: 28), onTimeout: () => event.movie);
+            .timeout(const Duration(seconds: 15), onTimeout: () => event.movie);
         emit(state.copyWith(movie: updatedMovie, isLoaded: true));
       }
     } catch (e) {

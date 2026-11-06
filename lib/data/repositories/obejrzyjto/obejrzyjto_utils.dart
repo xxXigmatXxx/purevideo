@@ -1,18 +1,28 @@
 import 'dart:convert';
 
-final RegExp _bootstrapDataRegex = RegExp(
-  r'window\.bootstrapData\s*=\s*(\{.*?\});',
-  dotAll: true,
-);
-
-Map<String, dynamic>? extractBootstrapData(String responseData) {
-  final match = _bootstrapDataRegex.firstMatch(responseData);
-  final jsonString = match?.group(1);
-
-  if (jsonString == null) return null;
-
-  final data = jsonDecode(jsonString);
-  return data is Map<String, dynamic> ? data : null;
+Map<String, dynamic>? extractBootstrapData(dynamic rawResponseData) {
+  if (rawResponseData == null) return null;
+  final responseData = rawResponseData.toString();
+  final markerIdx = responseData.indexOf('window.bootstrapData');
+  if (markerIdx == -1) return null;
+  final braceStart = responseData.indexOf('{', markerIdx);
+  if (braceStart == -1) return null;
+  final scriptEnd = responseData.indexOf('</script>', braceStart);
+  if (scriptEnd == -1) return null;
+  var braceEnd = responseData.lastIndexOf('};', scriptEnd);
+  if (braceEnd == -1 || braceEnd <= braceStart) {
+    braceEnd = responseData.lastIndexOf('}', scriptEnd);
+    if (braceEnd == -1 || braceEnd <= braceStart) return null;
+  } else {
+    braceEnd += 1; // include closing '}'
+  }
+  try {
+    final jsonString = responseData.substring(braceStart, braceEnd);
+    final data = jsonDecode(jsonString);
+    return data is Map<String, dynamic> ? data : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 String generateSlug(String title) {
@@ -42,6 +52,7 @@ String generateSlug(String title) {
   polishChars.forEach((polish, replacement) {
     slug = slug.replaceAll(polish, replacement);
   });
+
   slug = slug.toLowerCase();
   slug = slug.replaceAll(RegExp(r'[:\.\*\(\)\[\]{}]'), ' ');
   slug = slug.replaceAll(RegExp(r'[^\w\s-]'), ' ');

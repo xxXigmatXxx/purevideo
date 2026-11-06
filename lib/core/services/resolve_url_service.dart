@@ -1,79 +1,82 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:purevideo/data/models/link_model.dart';
 import 'package:purevideo/data/repositories/video_source_repository.dart';
 
 class ResolveUrlService {
   final Dio _dio;
   late final Dio _extDio;
-  String serverUrl = 'http://localhost:8080';
+  final String serverUrl = 'http://localhost:8080';
 
-  static final Uint8List _aesSbox = _buildAesSbox();
+  // --- Pure-Dart AES-256-CTR (for AES-256-GCM payload decryption in Byse/mfw09) ---
+  static const List<int> _aesSbox = [
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
+  ];
 
-  static Uint8List _buildAesSbox() {
-    final sbox = Uint8List(256);
-    final p = Uint8List(256);
-    final q = Uint8List(256);
-    int x = 1;
-    for (int i = 0; i < 255; i++) {
-      p[i] = x;
-      q[x] = i;
-      x ^= ((x << 1) ^ ((x & 0x80) != 0 ? 0x11b : 0)) & 0xff;
-    }
-    sbox[0] = 0x63;
-    for (int i = 1; i < 256; i++) {
-      final y = p[255 - q[i]];
-      int s = y;
-      for (int r = 1; r <= 4; r++) {
-        s ^= ((y << r) | (y >>> (8 - r))) & 0xff;
-      }
-      sbox[i] = (s ^ 0x63) & 0xff;
-    }
-    return sbox;
-  }
+  static const List<int> _aesRcon = [
+    0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36,
+  ];
 
-  static int _xtime(int a) =>
-      (((a << 1) ^ ((a & 0x80) != 0 ? 0x1b : 0)) & 0xff);
+  static int _xtime(int x) => ((x << 1) ^ (((x >> 7) & 1) * 0x1b)) & 0xff;
 
   static Uint8List _aes256ExpandKey(Uint8List key) {
     final w = Uint8List(240);
     w.setRange(0, 32, key);
-    int rcon = 1;
+    final temp = Uint8List(4);
     for (int i = 8; i < 60; i++) {
-      int t0 = w[(i - 1) * 4];
-      int t1 = w[(i - 1) * 4 + 1];
-      int t2 = w[(i - 1) * 4 + 2];
-      int t3 = w[(i - 1) * 4 + 3];
+      final prev = (i - 1) * 4;
+      temp[0] = w[prev];
+      temp[1] = w[prev + 1];
+      temp[2] = w[prev + 2];
+      temp[3] = w[prev + 3];
       if (i % 8 == 0) {
-        final tmp = t0;
-        t0 = _aesSbox[t1] ^ rcon;
-        t1 = _aesSbox[t2];
-        t2 = _aesSbox[t3];
-        t3 = _aesSbox[tmp];
-        rcon = _xtime(rcon);
+        final t = temp[0];
+        temp[0] = _aesSbox[temp[1]] ^ _aesRcon[i ~/ 8];
+        temp[1] = _aesSbox[temp[2]];
+        temp[2] = _aesSbox[temp[3]];
+        temp[3] = _aesSbox[t];
       } else if (i % 8 == 4) {
-        t0 = _aesSbox[t0];
-        t1 = _aesSbox[t1];
-        t2 = _aesSbox[t2];
-        t3 = _aesSbox[t3];
+        temp[0] = _aesSbox[temp[0]];
+        temp[1] = _aesSbox[temp[1]];
+        temp[2] = _aesSbox[temp[2]];
+        temp[3] = _aesSbox[temp[3]];
       }
-      w[i * 4] = w[(i - 8) * 4] ^ t0;
-      w[i * 4 + 1] = w[(i - 8) * 4 + 1] ^ t1;
-      w[i * 4 + 2] = w[(i - 8) * 4 + 2] ^ t2;
-      w[i * 4 + 3] = w[(i - 8) * 4 + 3] ^ t3;
+      final cur = i * 4;
+      final old = (i - 8) * 4;
+      w[cur] = w[old] ^ temp[0];
+      w[cur + 1] = w[old + 1] ^ temp[1];
+      w[cur + 2] = w[old + 2] ^ temp[2];
+      w[cur + 3] = w[old + 3] ^ temp[3];
     }
     return w;
   }
 
-  static Uint8List _aes256EncryptBlock(Uint8List block, Uint8List w) {
+  static Uint8List _aes256EncryptBlock(Uint8List input, Uint8List w) {
     final s = Uint8List(16);
     for (int i = 0; i < 16; i++) {
-      s[i] = block[i] ^ w[i];
+      s[i] = input[i] ^ w[i];
     }
     final t = Uint8List(16);
     for (int round = 1; round <= 14; round++) {
@@ -93,6 +96,7 @@ class ResolveUrlService {
       t[13] = _aesSbox[s[1]];
       t[14] = _aesSbox[s[6]];
       t[15] = _aesSbox[s[11]];
+
       if (round < 14) {
         for (int c = 0; c < 4; c++) {
           final idx = c * 4;
@@ -107,6 +111,7 @@ class ResolveUrlService {
           t[idx + 3] ^= xorAll ^ _xtime(a3 ^ a0);
         }
       }
+
       final ro = round * 16;
       for (int i = 0; i < 16; i++) {
         s[i] = t[i] ^ w[ro + i];
@@ -123,6 +128,7 @@ class ResolveUrlService {
     final out = Uint8List(ctLen);
     final counterBlock = Uint8List(16);
     counterBlock.setRange(0, 12, iv12);
+
     for (int offset = 0, blockIdx = 0;
         offset < ctLen;
         offset += 16, blockIdx++) {
@@ -131,6 +137,7 @@ class ResolveUrlService {
       counterBlock[13] = (ctr >>> 16) & 0xff;
       counterBlock[14] = (ctr >>> 8) & 0xff;
       counterBlock[15] = ctr & 0xff;
+
       final ks = _aes256EncryptBlock(counterBlock, w);
       final chunk = min(16, ctLen - offset);
       for (int i = 0; i < chunk; i++) {
@@ -147,85 +154,125 @@ class ResolveUrlService {
     return Uint8List.fromList(base64Decode(norm));
   }
 
-  static int _u32(int x) => x & 0xFFFFFFFF;
-  static int _rotl32(int x, int k) =>
-      (((x & 0xFFFFFFFF) << k) | ((x & 0xFFFFFFFF) >>> (32 - k))) & 0xFFFFFFFF;
-  static int _imul32(int a, int b) =>
-      ((a & 0xFFFFFFFF) * (b & 0xFFFFFFFF)) & 0xFFFFFFFF;
 
-  static void _byseYe(List<int> t) {
-    t[0] = _u32(t[0] + t[1]);
-    t[3] = _rotl32(t[3] ^ t[0], 16);
-    t[2] = _u32(t[2] + t[3]);
-    t[1] = _rotl32(t[1] ^ t[2], 12);
-    t[0] = _u32(t[0] + t[1]);
-    t[3] = _rotl32(t[3] ^ t[0], 8);
-    t[2] = _u32(t[2] + t[3]);
-    t[1] = _rotl32(t[1] ^ t[2], 7);
-  }
 
-  static List<int> _byseGr(List<int> bytes) {
-    final e = <int>[1779033703, 3144134277, 1013904242, 2773480762];
-    for (int i = 0; i < bytes.length; i++) {
-      e[0] = _u32(e[0] + (bytes[i] & 0xff));
-      e[0] = _rotl32(e[0], 7);
-      _byseYe(e);
-    }
-    for (int i = 0; i < 8; i++) {
-      _byseYe(e);
-    }
-    final r = List<int>.filled(512, 0);
-    for (int i = 0; i < 512; i++) {
-      _byseYe(e);
-      r[i] = _u32(e[0] ^ e[2]);
-    }
-    for (int i = 0; i < 2; i++) {
-      for (int s = 0; s < 512; s++) {
-        final a = r[s] & 511;
-        int c = _u32(r[s] + r[a]);
-        c = _rotl32(c, 13);
-        c = _u32(c ^ _imul32(r[(s + 1) & 511], 2654435761));
-        r[s] = c;
-        e[0] = _u32(e[0] ^ c);
-        _byseYe(e);
-      }
-    }
-    final n = List<int>.filled(8, 0);
-    for (int i = 0; i < 8; i++) {
-      _byseYe(e);
-      int s = e[0];
-      final a = i * 64;
-      for (int c = 0; c < 64; c++) {
-        final d = r[a + c];
-        s = _u32(s + d);
-        s = _rotl32(s, 5);
-        s = _u32(s ^ _imul32(d, 2246822519));
-      }
-      n[i] = _u32(s ^ e[2]);
-    }
-    return n;
-  }
-
-  static int _byseLeadingZeros(List<int> n) {
-    int e = 0;
-    for (int r = 0; r < n.length; r++) {
-      final v = n[r] & 0xFFFFFFFF;
-      if (v == 0) {
-        e += 32;
-      } else {
-        return e + (32 - v.bitLength);
-      }
-    }
-    return e;
-  }
-
-  static String _solveBysePow(String nonce, int difficulty) {
+  // Register-inlined zero-allocation PoW worker executed inside a background Isolate!
+  static String _solveBysePowInIsolate(String nonce, int difficulty) {
     if (difficulty <= 0) return '0';
-    final prefix = '$nonce:';
-    for (int s = 0; s < 500000; s++) {
-      final candidate = '$prefix$s';
-      final d = _byseGr(candidate.codeUnits);
-      if (_byseLeadingZeros(d) >= difficulty) {
+    final prefixUnits = '$nonce:'.codeUnits;
+    int init0 = 1779033703;
+    int init1 = 3144134277;
+    int init2 = 1013904242;
+    int init3 = 2773480762;
+
+    for (int i = 0; i < prefixUnits.length; i++) {
+      init0 = (init0 + (prefixUnits[i] & 0xff)) & 0xFFFFFFFF;
+      init0 = (((init0 << 7) | (init0 >>> 25))) & 0xFFFFFFFF;
+      init0 = (init0 + init1) & 0xFFFFFFFF;
+      init3 = (((init3 ^ init0) << 16) | ((init3 ^ init0) >>> 16)) & 0xFFFFFFFF;
+      init2 = (init2 + init3) & 0xFFFFFFFF;
+      init1 = (((init1 ^ init2) << 12) | ((init1 ^ init2) >>> 20)) & 0xFFFFFFFF;
+      init0 = (init0 + init1) & 0xFFFFFFFF;
+      init3 = (((init3 ^ init0) << 8) | ((init3 ^ init0) >>> 24)) & 0xFFFFFFFF;
+      init2 = (init2 + init3) & 0xFFFFFFFF;
+      init1 = (((init1 ^ init2) << 7) | ((init1 ^ init2) >>> 25)) & 0xFFFFFFFF;
+    }
+
+    final r = Uint32List(512);
+    final digits = Uint8List(12);
+
+    for (int s = 0; s < 220000; s++) {
+      int dLen = 0;
+      if (s == 0) {
+        digits[0] = 48;
+        dLen = 1;
+      } else {
+        int tmp = s;
+        while (tmp > 0) {
+          digits[dLen++] = 48 + (tmp % 10);
+          tmp ~/= 10;
+        }
+      }
+
+      int e0 = init0;
+      int e1 = init1;
+      int e2 = init2;
+      int e3 = init3;
+
+      for (int i = dLen - 1; i >= 0; i--) {
+        e0 = (e0 + digits[i]) & 0xFFFFFFFF;
+        e0 = ((e0 << 7) | (e0 >>> 25)) & 0xFFFFFFFF;
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+      }
+
+      for (int i = 0; i < 8; i++) {
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+      }
+
+      for (int i = 0; i < 512; i++) {
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+        e0 = (e0 + e1) & 0xFFFFFFFF;
+        e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+        e2 = (e2 + e3) & 0xFFFFFFFF;
+        e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+        r[i] = (e0 ^ e2) & 0xFFFFFFFF;
+      }
+
+      for (int pass = 0; pass < 2; pass++) {
+        for (int idx = 0; idx < 512; idx++) {
+          final a = r[idx] & 511;
+          int c = (r[idx] + r[a]) & 0xFFFFFFFF;
+          c = ((c << 13) | (c >>> 19)) & 0xFFFFFFFF;
+          c = (c ^ ((r[(idx + 1) & 511] * 2654435761) & 0xFFFFFFFF)) & 0xFFFFFFFF;
+          r[idx] = c;
+          e0 = (e0 ^ c) & 0xFFFFFFFF;
+          e0 = (e0 + e1) & 0xFFFFFFFF;
+          e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+          e2 = (e2 + e3) & 0xFFFFFFFF;
+          e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+          e0 = (e0 + e1) & 0xFFFFFFFF;
+          e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+          e2 = (e2 + e3) & 0xFFFFFFFF;
+          e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+        }
+      }
+
+      e0 = (e0 + e1) & 0xFFFFFFFF;
+      e3 = (((e3 ^ e0) << 16) | ((e3 ^ e0) >>> 16)) & 0xFFFFFFFF;
+      e2 = (e2 + e3) & 0xFFFFFFFF;
+      e1 = (((e1 ^ e2) << 12) | ((e1 ^ e2) >>> 20)) & 0xFFFFFFFF;
+      e0 = (e0 + e1) & 0xFFFFFFFF;
+      e3 = (((e3 ^ e0) << 8) | ((e3 ^ e0) >>> 24)) & 0xFFFFFFFF;
+      e2 = (e2 + e3) & 0xFFFFFFFF;
+      e1 = (((e1 ^ e2) << 7) | ((e1 ^ e2) >>> 25)) & 0xFFFFFFFF;
+
+      int st = e0;
+      for (int c = 0; c < 64; c++) {
+        final d = r[c];
+        st = (st + d) & 0xFFFFFFFF;
+        st = ((st << 5) | (st >>> 27)) & 0xFFFFFFFF;
+        st = (st ^ ((d * 2246822519) & 0xFFFFFFFF)) & 0xFFFFFFFF;
+      }
+      final w0 = (st ^ e2) & 0xFFFFFFFF;
+      final leadingZeros = w0 == 0 ? 32 : (32 - w0.bitLength);
+      if (leadingZeros >= difficulty) {
         return s.toString();
       }
     }
@@ -234,10 +281,10 @@ class ResolveUrlService {
 
   ResolveUrlService(this._dio) {
     _extDio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 7),
-      receiveTimeout: const Duration(seconds: 9),
+      connectTimeout: const Duration(seconds: 6),
+      receiveTimeout: const Duration(seconds: 7),
       followRedirects: true,
-      maxRedirects: 6,
+      maxRedirects: 5,
       validateStatus: (status) => status != null && status < 500,
       headers: {
         'User-Agent':
@@ -334,35 +381,69 @@ class ResolveUrlService {
     return null;
   }
 
+  // Safe O(N) linear unpacker with zero regex backtracking
   String? _unpackJsPacker(String html) {
     try {
-      final m = RegExp(
-        r"""eval\(function\(p,a,c,k,e,[dr]\)\{[\s\S]*?\}\(\s*'((?:\\'|[^'])*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:\\'|[^'])*)'\.split\('\|'\)""",
-      ).firstMatch(html);
-      if (m == null) return null;
-      var payload = m.group(1)!.replaceAll(r"\'", "'");
-      final radix = int.tryParse(m.group(2)!) ?? 36;
-      final count = int.tryParse(m.group(3)!) ?? 0;
-      final symtab = m.group(4)!.split('|');
-      if (count <= 0 || symtab.isEmpty) return null;
+      final startIdx = html.indexOf('eval(function(p,a,c,k,e,');
+      if (startIdx == -1) return null;
+      final splitMarker = ".split('|')";
+      final splitIdx = html.indexOf(splitMarker, startIdx);
+      if (splitIdx == -1 || splitIdx - startIdx > 250000) return null;
+
+      final bodyEnd = html.indexOf("}('", startIdx);
+      if (bodyEnd == -1 || bodyEnd >= splitIdx) return null;
+
+      // Scan first single-quoted string starting at bodyEnd + 3
+      final pStart = bodyEnd + 3;
+      final pBuf = StringBuffer();
+      int i = pStart;
+      while (i < splitIdx) {
+        final ch = html.codeUnitAt(i);
+        if (ch == 92 && i + 1 < splitIdx) {
+          // backslash
+          final next = html.codeUnitAt(i + 1);
+          if (next == 39 || next == 92) {
+            pBuf.writeCharCode(next);
+            i += 2;
+            continue;
+          }
+        } else if (ch == 39) {
+          // closing single quote
+          i++;
+          break;
+        }
+        pBuf.writeCharCode(ch);
+        i++;
+      }
+
+      final tail = html.substring(i, splitIdx);
+      final tailMatch = RegExp(
+        r"""^\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']*)$""",
+      ).firstMatch(tail);
+      if (tailMatch == null) return null;
+
+      final payload = pBuf.toString();
+      final radix = int.tryParse(tailMatch.group(1)!) ?? 36;
+      final count = int.tryParse(tailMatch.group(2)!) ?? 0;
+      final symtab = tailMatch.group(3)!.split('|');
+      if (radix < 2 || count <= 0 || count > 10000 || symtab.isEmpty) {
+        return null;
+      }
 
       String encodeBase(int val, int base) {
         const chars =
             '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
         if (val < base) {
-          return val < 36
-              ? chars[val]
-              : String.fromCharCode(val + 29);
+          return val < 36 ? chars[val] : String.fromCharCode(val + 29);
         }
         return encodeBase(val ~/ base, base) + encodeBase(val % base, base);
       }
 
       final dict = <String, String>{};
-      for (int i = count - 1; i >= 0; i--) {
-        final key = encodeBase(i, radix);
-        final replacement = (i < symtab.length && symtab[i].isNotEmpty)
-            ? symtab[i]
-            : key;
+      for (int idx = count - 1; idx >= 0; idx--) {
+        final key = encodeBase(idx, radix);
+        final replacement =
+            (idx < symtab.length && symtab[idx].isNotEmpty) ? symtab[idx] : key;
         dict[key] = replacement;
       }
 
@@ -408,7 +489,11 @@ class ResolveUrlService {
           final diff = (capJson['pow_difficulty'] as num?)?.toInt() ?? 12;
           final powToken = (capJson['pow_token'] ?? '').toString();
           if (nonce.isNotEmpty && powToken.isNotEmpty) {
-            final solution = _solveBysePow(nonce, diff);
+            // Solve PoW on a background isolate so the main UI thread never freezes!
+            final solution = await Isolate.run(
+              () => _solveBysePowInIsolate(nonce, diff),
+            ).timeout(const Duration(seconds: 4), onTimeout: () => '0');
+
             final verResp = await _extDio.post<String>(
               '$origin/api/videos/$code/embed/captcha/verify',
               data: jsonEncode({
@@ -451,6 +536,7 @@ class ResolveUrlService {
       final version = int.tryParse((pb['version'] ?? '1').toString()) ?? 1;
       final keyParts = pb['key_parts'];
       if (keyParts is! List || keyParts.length < 30) return const [];
+
       final p1 = _b64UrlDecode(keyParts[version - 1].toString());
       final p2 = _b64UrlDecode(keyParts[31 - version - 1].toString());
       final key32 = Uint8List(p1.length + p2.length);
@@ -460,7 +546,9 @@ class ResolveUrlService {
 
       final iv12 = _b64UrlDecode((pb['iv'] ?? '').toString());
       final rawPayload = _b64UrlDecode((pb['payload'] ?? '').toString());
-      final decryptedBytes = _aes256GcmDecryptPayload(key32, iv12, rawPayload);
+      final decryptedBytes = await Isolate.run(
+        () => _aes256GcmDecryptPayload(key32, iv12, rawPayload),
+      );
       if (decryptedBytes.isEmpty) return const [];
 
       final decryptedJson = jsonDecode(
@@ -497,7 +585,8 @@ class ResolveUrlService {
   }
 
   Future<List<VideoSource>> _resolveDirectInDart(
-      HostLink link, String cleanedUrl) async {
+      HostLink link, String cleanedUrl,
+      {bool allowByse = true}) async {
     try {
       var currentUrl = cleanedUrl;
       var html = '';
@@ -521,8 +610,8 @@ class ResolveUrlService {
         }
         break;
       }
-
       if (html.isEmpty) return const [];
+
       final parsedUri = Uri.tryParse(currentUrl);
       final origin = parsedUri != null
           ? '${parsedUri.scheme}://${parsedUri.host}'
@@ -627,10 +716,11 @@ class ResolveUrlService {
       }
 
       // 0b. Byse Frontend (mfw09.org, bysekoze.com, byse*, filemoon Byse)
-      if (html.contains('Byse Frontend') ||
-          html.contains('video-embed-mode') ||
-          currentUrl.contains('mfw09.') ||
-          currentUrl.contains('byse')) {
+      if (allowByse &&
+          (html.contains('Byse Frontend') ||
+              html.contains('video-embed-mode') ||
+              currentUrl.contains('mfw09.') ||
+              currentUrl.contains('byse'))) {
         final byseSources =
             await _resolveByseInDart(link, currentUrl, origin, hdrs);
         if (byseSources.isNotEmpty) {
@@ -709,7 +799,6 @@ class ResolveUrlService {
       if (html.contains('eval(function(p,a,c,k,e,')) {
         final unpacked = _unpackJsPacker(html);
         if (unpacked != null && unpacked.isNotEmpty) {
-          // MixDrop: MDCore.wurl = "//..."
           final mdMatch = RegExp(
             r'''wurl\s*=\s*["']([^"']+)["']''',
           ).firstMatch(unpacked);
@@ -728,7 +817,7 @@ class ResolveUrlService {
               ];
             }
           }
-          // Generic HLS/MP4 in unpacked JS
+
           final fileMatch = RegExp(
             r'''(?:file|src)\s*:\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']''',
             caseSensitive: false,
@@ -846,12 +935,17 @@ class ResolveUrlService {
 
   Future<List<VideoSource>> resolve(List<HostLink> urls) async {
     debugPrint('Resolving URLs: $urls');
+    final seenUrls = <String>{};
     final unwrappedResults = await Future.wait(urls.map((u) async {
-      if (u.url.trim().isEmpty || u.url.contains('upzone.cc')) return null;
-      final unwrapped = await _unwrapUrl(u.url);
+      final raw = u.url.trim();
+      if (raw.isEmpty || raw.contains('upzone.cc') || !seenUrls.add(raw)) {
+        return null;
+      }
+      final unwrapped = await _unwrapUrl(raw);
       if (unwrapped.isNotEmpty &&
           !unwrapped.contains('upzone.cc') &&
-          !unwrapped.contains('ekino.link')) {
+          !unwrapped.contains('ekino.link') &&
+          !unwrapped.contains('play.ekino')) {
         return u.copyWith(url: unwrapped);
       }
       return null;
@@ -859,9 +953,15 @@ class ResolveUrlService {
     final unwrappedList = unwrappedResults.whereType<HostLink>().toList();
     if (unwrappedList.isEmpty) return [];
 
-    // 1. Fast pure-Dart direct extraction in parallel (Vidneo, Byse/mfw09, VOE, Shvid, MixDrop, DoodStream, Vidoza, Streamtape)
-    final dartFutures =
-        unwrappedList.map((u) => _resolveDirectInDart(u, u.url)).toList();
+    // Limit Byse PoW to at most 1 link per movie so we never spawn multiple PoW workers
+    int byseCount = 0;
+    final dartFutures = unwrappedList.map((u) {
+      final lower = u.url.toLowerCase();
+      final isByse = lower.contains('mfw09.') || lower.contains('byse');
+      final allowByse = !isByse || (++byseCount <= 1);
+      return _resolveDirectInDart(u, u.url, allowByse: allowByse);
+    }).toList();
+
     final dartResults = await Future.wait(dartFutures);
 
     final nativeSources = <VideoSource>[];
@@ -874,14 +974,15 @@ class ResolveUrlService {
       }
     }
 
-    // 2. Local Python ResolveURL server for any remaining hosts
-    if (remainingUrls.isNotEmpty) {
+    // Only call fallback Python server if pure-Dart resolvers found 0 sources
+    if (nativeSources.isEmpty && remainingUrls.isNotEmpty) {
       try {
         final isUp = await _waitForServer();
         if (isUp) {
           final response = await _dio.post(
             '$serverUrl/resolve',
             data: jsonEncode(remainingUrls
+                .take(4)
                 .map((link) => {
                       'url': link.url,
                       'language': link.lang,
@@ -890,12 +991,13 @@ class ResolveUrlService {
                 .toList()),
             options: Options(
               headers: {'Content-Type': 'application/json'},
-              connectTimeout: const Duration(seconds: 5),
-              receiveTimeout: const Duration(seconds: 22),
-              sendTimeout: const Duration(seconds: 5),
+              connectTimeout: const Duration(seconds: 3),
+              receiveTimeout: const Duration(seconds: 8),
+              sendTimeout: const Duration(seconds: 3),
               validateStatus: (status) => status != null && status < 500,
             ),
           );
+
           if (response.data is List && (response.data as List).isNotEmpty) {
             final resolved = (response.data as List)
                 .map((item) => VideoSource(
@@ -910,10 +1012,14 @@ class ResolveUrlService {
                 .where((s) =>
                     s.url.isNotEmpty &&
                     !s.host.contains('(Web)') &&
-                    s.url != remainingUrls.firstWhere(
-                      (r) => r.url == s.url,
-                      orElse: () => HostLink(url: '', lang: '', quality: ''),
-                    ).url)
+                    s.url !=
+                        remainingUrls
+                            .firstWhere(
+                              (r) => r.url == s.url,
+                              orElse: () =>
+                                  HostLink(url: '', lang: '', quality: ''),
+                            )
+                            .url)
                 .toList();
             nativeSources.addAll(resolved);
           }
@@ -927,20 +1033,20 @@ class ResolveUrlService {
   }
 
   Future<bool> _waitForServer() async {
-    for (var i = 0; i < 30; i++) {
+    for (var i = 0; i < 8; i++) {
       try {
         final r = await _dio.get(
           '$serverUrl/health',
           options: Options(
-            connectTimeout: const Duration(milliseconds: 400),
-            receiveTimeout: const Duration(milliseconds: 400),
-            sendTimeout: const Duration(milliseconds: 400),
+            connectTimeout: const Duration(milliseconds: 300),
+            receiveTimeout: const Duration(milliseconds: 300),
+            sendTimeout: const Duration(milliseconds: 300),
             validateStatus: (_) => true,
           ),
         );
         if (r.statusCode == 200) return true;
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 250));
+      await Future.delayed(const Duration(milliseconds: 200));
     }
     return false;
   }
