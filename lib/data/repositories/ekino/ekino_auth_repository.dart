@@ -87,7 +87,7 @@ class EkinoAuthRepository implements AuthRepository {
           _account = null;
           _dio = EkinoDioFactory.getDio(null);
           _authController.add(
-            const AuthModel(
+            AuthModel(
               service: SupportedService.ekino,
               success: false,
               account: null,
@@ -162,7 +162,7 @@ class EkinoAuthRepository implements AuthRepository {
       }
 
       final captchaToken =
-          await _captchaService.getCaptchaToken(SupportedService.ekino);
+          await _captchaService.getToken(SupportedService.ekino.loginCaptchaConfig, SupportedService.ekino.baseUrl);
 
       final response = await _dio.post(
         '/icall/login',

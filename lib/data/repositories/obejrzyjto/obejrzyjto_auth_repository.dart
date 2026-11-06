@@ -55,7 +55,7 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
           _account = null;
           _dio = ObejrzyjtoDioFactory.getDio(null);
           _authController.add(
-            const AuthModel(
+            AuthModel(
               service: SupportedService.obejrzyjto,
               success: false,
               account: null,
