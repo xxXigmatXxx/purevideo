@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:diacritic/diacritic.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -22,12 +23,24 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
   final MergeService _mergeService = getIt();
   final WatchedService _watchedService = getIt();
 
+  static final _nonWordRegex = RegExp(r'[^\w\s]');
+  static final _spacesRegex = RegExp(r'\s+');
+
   MovieDetailsBloc() : super(const MovieDetailsState()) {
     on<LoadMovieDetails>(_onLoadMovieDetails);
     on<LoadFilmwebMovieDetails>(_onLoadFilmwebMovieDetails);
     on<ScrapeVideoUrls>(_onScrapeVideoUrls);
     on<SelectSeason>(_onSelectSeason);
     on<UpdateWatchedStatus>(_onUpdateWatchedStatus);
+  }
+
+  String _normTitle(String title) {
+    return removeDiacritics(title
+        .toLowerCase()
+        .trim()
+        .replaceAll(_nonWordRegex, '')
+        .replaceAll(_spacesRegex, '')
+        .trim());
   }
 
   Future<void> _onLoadFilmwebMovieDetails(
@@ -50,7 +63,6 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       }
 
       final results = <MovieModel>[];
-
       final loggedServiceEntries = _searchRepositories.entries
           .where((entry) => _authRepositories[entry.key]?.getAccount() != null)
           .toList();
@@ -77,8 +89,9 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
         }).toList();
 
         final searchLists = await Future.wait(searchFutures);
+
         for (final result in searchLists) {
-          _mergeService.addFromServiceTemp(result, results);
+          await _mergeService.addFromServiceTemp(result, results);
         }
 
         if (results.isEmpty) {
@@ -89,6 +102,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           ));
           return;
         }
+
         add(LoadMovieDetails(movie: results.first));
       } else {
         emit(state.copyWith(
@@ -106,10 +120,48 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
   Future<void> _onLoadMovieDetails(
       LoadMovieDetails event, Emitter<MovieDetailsState> emit) async {
     try {
+      final candidateServices =
+          List<ServiceMovieModel>.from(event.movie.services);
+      final existingTypes = candidateServices.map((s) => s.service).toSet();
+      final baseTitle = event.movie.title.trim();
+      final normBase = _normTitle(baseTitle);
+
+      // Cross-search other logged-in services (e.g. Ekino <-> Obejrzyj.to) so every movie gets all available sources
+      if (baseTitle.isNotEmpty && normBase.isNotEmpty) {
+        final missingSearchEntries = _searchRepositories.entries
+            .where((entry) =>
+                !existingTypes.contains(entry.key) &&
+                _authRepositories[entry.key]?.getAccount() != null)
+            .toList();
+
+        if (missingSearchEntries.isNotEmpty) {
+          final extraLists = await Future.wait(
+            missingSearchEntries.map((entry) async {
+              try {
+                return await entry.value
+                    .searchMovies(baseTitle)
+                    .timeout(const Duration(seconds: 5), onTimeout: () => []);
+              } catch (_) {
+                return <ServiceMovieModel>[];
+              }
+            }),
+          );
+          for (final list in extraLists) {
+            for (final item in list) {
+              if (_normTitle(item.title) == normBase &&
+                  !candidateServices.any((s) => s.service == item.service)) {
+                candidateServices.add(item);
+                break;
+              }
+            }
+          }
+        }
+      }
+
       final services = <ServiceMovieDetailsModel>[];
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
-      for (final serivceMovie in event.movie.services) {
+      for (final serivceMovie in candidateServices) {
         final authRepository = _authRepositories[serivceMovie.service];
         if (authRepository == null) {
           continue;
@@ -117,7 +169,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
         final account = authRepository.getAccount();
         if (account == null) {
-          if (event.movie.services.length == 1) {
+          if (candidateServices.length == 1) {
             return emit(state.copyWith(
               errorMessage:
                   'Nie jesteś zalogowany do ${serivceMovie.service.displayName}',
@@ -135,7 +187,6 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           try {
             final details =
                 await movieRepository.getMovieDetails(serivceMovie.url);
-            // Preserve valid title and poster from MovieModel if details page had empty/placeholder values
             final fixedTitle = (details.title.trim().isEmpty ||
                     details.title.trim() == 'Brak tytułu')
                 ? serivceMovie.title
@@ -150,7 +201,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
           } catch (e) {
             debugPrint(
                 'Error loading details from ${serivceMovie.service}: $e');
-            if (event.movie.services.length == 1) rethrow;
+            if (candidateServices.length == 1) rethrow;
             return null;
           }
         }());
@@ -158,6 +209,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
 
       services.addAll((await Future.wait(detailsFutures))
           .whereType<ServiceMovieDetailsModel>());
+
       if (services.isEmpty) {
         throw Exception('Nie udało się pobrać szczegółów z żadnego serwisu');
       }

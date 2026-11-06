@@ -19,6 +19,7 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
   final List<MovieModel> _movies = [];
   final List<StreamSubscription<AuthModel>> _authSubscriptions = [];
   bool _isRefreshing = false;
+  bool _pendingRefresh = false;
 
   MoviesBloc() : super(MoviesInitial()) {
     on<LoadMoviesRequested>(_onLoadMoviesRequested);
@@ -65,9 +66,11 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
     LoadMoviesRequested event,
     Emitter<MoviesState> emit,
   ) async {
-    if (_isRefreshing) return;
+    if (_isRefreshing) {
+      _pendingRefresh = true;
+      return;
+    }
     _isRefreshing = true;
-
     try {
       final loggedServices = _authRepositories.entries
           .where((entry) => entry.value.getAccount() != null)
@@ -132,6 +135,7 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
 
           final filteredFresh =
               _filterForLoggedServices(freshMerged, loggedServices);
+
           if (filteredFresh.isNotEmpty) {
             merge.replaceAll(filteredFresh);
             _movies
@@ -157,6 +161,10 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
       }
     } finally {
       _isRefreshing = false;
+      if (_pendingRefresh && !isClosed) {
+        _pendingRefresh = false;
+        add(LoadMoviesRequested());
+      }
     }
   }
 }

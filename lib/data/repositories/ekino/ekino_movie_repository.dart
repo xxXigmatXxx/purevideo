@@ -61,27 +61,24 @@ class EkinoMovieRepository implements MovieRepository {
   }
 
   String _cleanTitle(String rawTitle) {
-    var t = rawTitle.trim();
+    var t = rawTitle.replaceAll('\u00a0', ' ').trim();
     if (t.contains(' / ')) {
       t = t.split(' / ').first.trim();
     }
     t = t
         .replaceAll(
           RegExp(
-            r'\s*-\s*(?:HD|CAM|4K|FHD|AI|Dubbing|Lektor|Napisy).*$',
+            r'\s*-\s*(?:HD|CAM|4K|FHD|AI|PL|Dubbing|Lektor|Napisy)(?:\s+.*)?$',
             caseSensitive: false,
           ),
           '',
         )
         .trim();
-    if (t.contains(' - ')) {
-      t = t.split(' - ').first.trim();
-    }
     return t.isEmpty ? rawTitle.trim() : t;
   }
 
   String _normalizeImageUrl(String raw) {
-    final u = raw.trim();
+    var u = raw.trim().replaceAll('/static/thumb/', '/static/normal/');
     if (u.isEmpty) return '';
     if (u.startsWith('//')) return 'https:$u';
     if (u.startsWith('/')) return '${SupportedService.ekino.baseUrl}$u';
@@ -144,7 +141,6 @@ class EkinoMovieRepository implements MovieRepository {
             _sessionCookies.remove(name);
             continue;
           }
-          // Do not overwrite an already verified PHPSESSID unless we had none
           if (name == 'PHPSESSID' && _sessionCookies.containsKey('PHPSESSID')) {
             continue;
           }
@@ -187,6 +183,7 @@ class EkinoMovieRepository implements MovieRepository {
   Future<List<HostLink>> _extractHostLinksFromDocument(
       dom.Document document) async {
     final videoUrls = <HostLink>[];
+
     final tabPanes =
         document.querySelectorAll('.tab-content .tab-pane[role="tabpanel"]');
     final playerTabs = document.querySelectorAll('#myTab li');
@@ -202,6 +199,7 @@ class EkinoMovieRepository implements MovieRepository {
 
       final onclickLink = tabPane.querySelector('a[onclick]');
       if (onclickLink == null) continue;
+
       final onclick = onclickLink.attributes['onclick'] ?? '';
       if (onclick.isEmpty) continue;
 
@@ -213,11 +211,13 @@ class EkinoMovieRepository implements MovieRepository {
       final hostName = (onclickMatch.group(1) ?? '').trim();
       final hostId = (onclickMatch.group(2) ?? '').trim();
       if (hostName.isEmpty || hostId.isEmpty) continue;
+
       final lowerHost = hostName.toLowerCase();
       if (_deadHosts.any((dead) => lowerHost.contains(dead))) continue;
 
       final languageIcon = playerTab.querySelector('i.glyphicon');
       final language = languageIcon?.attributes['title']?.trim() ?? 'PL';
+
       final qualityIcon = playerTab.querySelector('img');
       final quality = qualityIcon?.attributes['title']?.trim() ?? 'HD';
 
@@ -238,7 +238,6 @@ class EkinoMovieRepository implements MovieRepository {
 
     for (final cand in candidates) {
       if (turnstileCancelled) break;
-      // Stop once we already have 2 working links or queried 3 gates so we don't waste the 6-gate free IP quota
       if (videoUrls.length >= 2 || gatesQueried >= 3) break;
       gatesQueried++;
 
@@ -252,9 +251,10 @@ class EkinoMovieRepository implements MovieRepository {
         videoUrl = gateDoc.querySelector('a.buttonprch')?.attributes['href'] ??
             gateDoc.querySelector('a[href*="play.ekino"]')?.attributes['href'];
 
-        if ((videoUrl == null || videoUrl.isEmpty) && !turnstileAttempted) {
+        if ((videoUrl == null || videoUrl.isEmpty) &&
+            !turnstileAttempted &&
+            videoUrls.isEmpty) {
           turnstileAttempted = true;
-          // Clear stale PHPSESSID so WebView's verified PHPSESSID becomes authoritative
           _sessionCookies.remove('PHPSESSID');
           final elem = await getIt<WebViewService>().waitForDomElement(
             '${SupportedService.ekino.baseUrl}$gateUrl',
@@ -271,8 +271,10 @@ class EkinoMovieRepository implements MovieRepository {
         if (videoUrl != null && videoUrl.startsWith('//')) {
           videoUrl = 'https:$videoUrl';
         }
-
-        if (videoUrl != null && videoUrl.contains('ekino.link')) {
+        if (videoUrl != null &&
+            (videoUrl.contains('ekino.link') ||
+                videoUrl.contains('play.ekino') ||
+                videoUrl.contains('ekino-tv'))) {
           final cookieHdr = _dio!.options.headers['Cookie']?.toString() ?? '';
           final linkResp = await Dio(BaseOptions(
             headers: {
@@ -298,7 +300,8 @@ class EkinoMovieRepository implements MovieRepository {
       if (videoUrl == null ||
           videoUrl.isEmpty ||
           videoUrl.contains('upzone.cc') ||
-          videoUrl.contains('ekino.link')) {
+          videoUrl.contains('ekino.link') ||
+          videoUrl.contains('play.ekino')) {
         continue;
       }
 
@@ -328,6 +331,7 @@ class EkinoMovieRepository implements MovieRepository {
   @override
   Future<ServiceMovieDetailsModel> getMovieDetails(String url) async {
     await _prepareDio();
+
     final response = await _dio!.get(url);
     await _saveSetCookiesFromResponse(response);
     final document = html.parse(response.data);
@@ -338,6 +342,7 @@ class EkinoMovieRepository implements MovieRepository {
 
     final descriptionElement = document.querySelector('.descriptionMovie');
     String description = descriptionElement?.text.trim() ?? '';
+
     final lines = description.split('\n');
     final cleanLines = <String>[];
     for (final line in lines) {
@@ -357,29 +362,37 @@ class EkinoMovieRepository implements MovieRepository {
     if (isSeries) {
       final seasons = <SeasonModel>[];
       final seriesContainer = document.querySelector('#list-series');
+
       if (seriesContainer != null) {
         final children = seriesContainer.children;
         for (int i = 0; i < children.length; i += 2) {
           final seasonElement = children[i];
           if (seasonElement.localName != 'p') continue;
+
           final seasonName = seasonElement.text.trim();
           if (i + 1 >= children.length) continue;
+
           final episodesList = children[i + 1];
           if (episodesList.localName != 'ul' ||
               !episodesList.classes.contains('list-series')) {
             continue;
           }
+
           final seasonNumberMatch =
               RegExp(r'Sezon (\d+)').firstMatch(seasonName);
           final seasonNumber = seasonNumberMatch != null
               ? int.tryParse(seasonNumberMatch.group(1) ?? '0') ?? 0
               : 0;
+
           final episodes = <EpisodeModel>[];
+
           for (final episodeItem in episodesList.children) {
             final episodeLink = episodeItem.querySelector('a');
             if (episodeLink == null) continue;
+
             final episodeUrl = episodeLink.attributes['href'] ?? '';
             if (episodeUrl.isEmpty) continue;
+
             final episodeTitle = episodeLink.text.trim();
             final episodeNumberDiv = episodeItem.querySelector('div');
             final episodeNumber = episodeNumberDiv != null
@@ -473,31 +486,41 @@ class EkinoMovieRepository implements MovieRepository {
           final document = html.parse(response.data);
           final movies = <ServiceMovieModel>[];
           final movieSections = document.querySelectorAll('.mostPopular');
+
           for (final section in movieSections) {
             final categoryElement = section.querySelector('h4');
             if (categoryElement == null) continue;
+
             final subCategoryElement = section.querySelector('span');
             String category =
                 categoryElement.text.replaceAll('!', '').trim();
             if (subCategoryElement != null && category == 'Najpopularniejsze') {
               category += ' ${subCategoryElement.text.trim()}';
             }
+
             final movieList = section.querySelector('ul.list');
             if (movieList == null) continue;
+
             for (final item in movieList.children) {
               final leftScope = item.querySelector('.scope_left');
               if (leftScope == null) continue;
+
               final link = leftScope.querySelector('a');
               if (link == null) continue;
+
               final url = (link.attributes['href'] ?? '').trim();
               if (url.isEmpty) continue;
+
               final img = link.querySelector('img');
               if (img == null) continue;
+
               final imageUrl =
                   _normalizeImageUrl(img.attributes['src'] ?? '');
               final rawTitle = img.attributes['alt']?.trim() ?? '';
               final cleanTitle = _cleanTitle(rawTitle);
+
               if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
+
               movies.add(ServiceMovieModel(
                 service: SupportedService.ekino,
                 title: cleanTitle,

@@ -16,6 +16,7 @@ class AccountsScreen extends StatelessWidget {
   static const _activeServices = [
     SupportedService.filman,
     SupportedService.obejrzyjto,
+    SupportedService.ekino,
   ];
 
   @override
@@ -82,6 +83,7 @@ class AccountsScreen extends StatelessWidget {
                       if (state is AccountsLoading) {
                         return const Center(child: CircularProgressIndicator());
                       }
+
                       if (state is AccountsError) {
                         return ErrorView(
                           message: state.message,
@@ -92,6 +94,7 @@ class AccountsScreen extends StatelessWidget {
                           },
                         );
                       }
+
                       if (state is AccountsLoaded) {
                         if (state.accounts.isEmpty) {
                           return const Center(
@@ -100,6 +103,7 @@ class AccountsScreen extends StatelessWidget {
                             ),
                           );
                         }
+
                         return Column(
                           children: state.accounts.entries.map((account) {
                             return ListTile(
@@ -142,6 +146,7 @@ class AccountsScreen extends StatelessWidget {
                           }).toList(),
                         );
                       }
+
                       return const Center(
                         child: Text('Nieoczekiwany błąd. Spróbuj ponownie.'),
                       );

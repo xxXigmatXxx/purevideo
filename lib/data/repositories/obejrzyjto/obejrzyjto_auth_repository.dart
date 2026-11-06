@@ -18,6 +18,13 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
   late StreamSubscription<AuthModel> _authSubscription;
 
   ObejrzyjtoAuthRepository([AccountModel? account]) {
+    _account = account ??
+        AccountModel(
+          fields: const {'login': 'Gość'},
+          cookies: const [],
+          service: SupportedService.obejrzyjto,
+        );
+    _dio = ObejrzyjtoDioFactory.getDio(_account);
     _loadSavedAccount();
     _authSubscription = _authController.stream.listen(_onAuthChanged);
   }
@@ -32,9 +39,40 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
       if (accountJson != null) {
         _account = AccountModel.fromMap(jsonDecode(accountJson));
         _dio = ObejrzyjtoDioFactory.getDio(_account);
-
-        try {
-          await _dio.get('/');
+        _authController.add(
+          AuthModel(
+            service: SupportedService.obejrzyjto,
+            success: true,
+            account: _account,
+          ),
+        );
+      } else {
+        final loggedOut = await SecureStorageService.getServiceData(
+          SupportedService.obejrzyjto,
+          'logged_out',
+        );
+        if (loggedOut == 'true') {
+          _account = null;
+          _dio = ObejrzyjtoDioFactory.getDio(null);
+          _authController.add(
+            const AuthModel(
+              service: SupportedService.obejrzyjto,
+              success: false,
+              account: null,
+            ),
+          );
+        } else {
+          _account = AccountModel(
+            fields: const {'login': 'Gość'},
+            cookies: const [],
+            service: SupportedService.obejrzyjto,
+          );
+          _dio = ObejrzyjtoDioFactory.getDio(_account);
+          await SecureStorageService.saveServiceData(
+            SupportedService.obejrzyjto,
+            'account',
+            jsonEncode(_account!.toMap()),
+          );
           _authController.add(
             AuthModel(
               service: SupportedService.obejrzyjto,
@@ -42,20 +80,11 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
               account: _account,
             ),
           );
-        } catch (e) {
-          await SecureStorageService.deleteServiceData(
-            SupportedService.obejrzyjto,
-            'account',
-          );
-          _account = null;
-          _dio = ObejrzyjtoDioFactory.getDio(null);
         }
-      } else {
-        _dio = ObejrzyjtoDioFactory.getDio(null);
       }
     } catch (e) {
       debugPrint('Błąd podczas ładowania konta Obejrzyj.to: $e');
-      _dio = ObejrzyjtoDioFactory.getDio(null);
+      _dio = ObejrzyjtoDioFactory.getDio(_account);
     }
   }
 
@@ -73,6 +102,10 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
     Map<String, String> fields,
   ) async {
     try {
+      await SecureStorageService.deleteServiceData(
+        SupportedService.obejrzyjto,
+        'logged_out',
+      );
       if (fields.containsKey('anonymous')) {
         _account = AccountModel(
           fields: {
@@ -81,11 +114,13 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
           cookies: [],
           service: SupportedService.obejrzyjto,
         );
+
         final authModel = AuthModel(
           service: SupportedService.obejrzyjto,
           success: true,
           account: _account,
         );
+
         _authController.add(authModel);
         return authModel;
       }
@@ -117,15 +152,15 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
       if (response.headers['set-cookie'] != null) {
         final cookies = response.headers['set-cookie']
                 ?.map((header) => RawCookie.parse(header))
-          .whereType<Cookie>()
+                .whereType<Cookie>()
                 .toList() ??
             [];
-
         _account = AccountModel(
           fields: fields,
           cookies: cookies,
           service: SupportedService.obejrzyjto,
         );
+
         final authModel = AuthModel(
           service: SupportedService.obejrzyjto,
           success: true,
@@ -134,6 +169,7 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
         _authController.add(authModel);
         return authModel;
       }
+
       final authModel = AuthModel(
         service: SupportedService.obejrzyjto,
         success: false,
@@ -161,13 +197,15 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
   Future<void> setAccount(AccountModel account) async {
     _account = account;
     _dio = ObejrzyjtoDioFactory.getDio(_account);
-
+    await SecureStorageService.deleteServiceData(
+      SupportedService.obejrzyjto,
+      'logged_out',
+    );
     await SecureStorageService.saveServiceData(
       SupportedService.obejrzyjto,
       'account',
       jsonEncode(account.toMap()),
     );
-
     _authController.add(
       AuthModel(
         service: SupportedService.obejrzyjto,
@@ -191,6 +229,11 @@ class ObejrzyjtoAuthRepository implements AuthRepository {
     await SecureStorageService.deleteServiceData(
       SupportedService.obejrzyjto,
       'account',
+    );
+    await SecureStorageService.saveServiceData(
+      SupportedService.obejrzyjto,
+      'logged_out',
+      'true',
     );
   }
 

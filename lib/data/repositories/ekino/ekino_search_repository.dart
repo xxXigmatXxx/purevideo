@@ -31,20 +31,20 @@ class EkinoSearchRepository extends SearchRepository {
   }
 
   String _cleanTitle(String raw) {
-    var t = raw.trim();
-    t = t.replaceFirst(
-      RegExp(
-        r'\s+-\s+(HD|CAM|4K|AI|PL|Lektor|Dubbing|Napisy).*$',
-        caseSensitive: false,
-      ),
-      '',
-    );
+    var t = raw.replaceAll('\u00a0', ' ').trim();
     if (t.contains(' / ')) {
       final first = t.split(' / ').first.trim();
       if (first.isNotEmpty) {
         t = first;
       }
     }
+    t = t.replaceFirst(
+      RegExp(
+        r'\s*-\s*(?:HD|CAM|4K|FHD|AI|PL|Lektor|Dubbing|Napisy)(?:\s+.*)?$',
+        caseSensitive: false,
+      ),
+      '',
+    );
     return t.trim();
   }
 
@@ -72,7 +72,8 @@ class EkinoSearchRepository extends SearchRepository {
       if (url.isEmpty) return;
 
       final imageUrl =
-          coverElement.querySelector('img')?.attributes['src'] ?? '';
+          (coverElement.querySelector('img')?.attributes['src'] ?? '')
+              .replaceAll('/static/thumb/', '/static/normal/');
 
       final titleElement = movieElement.querySelector('.opis-list .title a');
       if (titleElement == null) return;

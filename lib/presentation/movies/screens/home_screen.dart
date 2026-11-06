@@ -267,13 +267,16 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showCategoryPicker(BuildContext context, List<String> categories) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Column(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
@@ -347,6 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
+          ),
           ),
         );
       },

@@ -206,7 +206,7 @@ class MovieDetailsModel {
   String get imageUrl => filmwebInfo?.posterUrl ?? services.first.imageUrl;
 
   List<HostLink>? get videoUrls =>
-      services.expand((e) => e.videoUrls as Iterable<HostLink>).toList();
+      services.expand((e) => e.videoUrls ?? const <HostLink>[]).toList();
 
   final List<VideoSource>? directUrls;
 
