@@ -5,6 +5,7 @@ import 'dart:io' as io;
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
 import 'package:purevideo/core/utils/global_context.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -90,19 +91,26 @@ class WebViewService {
                 },
                 body: 'verify=' + encodeURIComponent(token)
               })
-              .then(function() {
+              .then(function(vr) {
+                return vr.json().catch(function() { return {}; });
+              })
+              .then(function(vData) {
+                var verifyOk = !vData || !vData.error;
                 return fetch(targetUrl, {
                   method: 'GET',
                   credentials: 'include',
                   cache: 'no-store'
-                });
-              })
-              .then(function(r) { return r.text(); })
-              .then(function(html) {
-                if (!extractAndFinish(html)) {
+                })
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                  if (extractAndFinish(html)) return;
+                  if (verifyOk) {
+                    window.flutter_inappwebview.callHandler('messageHandler', '<a class="buttonprch" href="VERIFIED_SESSION"></a>');
+                    return;
+                  }
                   if (st2) st2.textContent = 'Ponawianie weryfikacji...';
                   pvRetry();
-                }
+                });
               })
               .catch(function() {
                 pvRetry();
@@ -166,9 +174,16 @@ class WebViewService {
             timeoutSeconds: 60)
         .then((result) {
       if (result != null && result.trim().isNotEmpty) {
-        final document = dom.Document.html(result);
-        final element = document.querySelector(elementSelector) ??
+        final document = html_parser.parse(result);
+        dom.Element? element = document.querySelector(elementSelector) ??
             document.querySelector('a');
+        if (element == null || (element.attributes['href'] ?? '').isEmpty) {
+          final m = RegExp(r'''href=["']([^"']+)["']''', caseSensitive: false)
+              .firstMatch(result);
+          if (m != null && (m.group(1) ?? '').isNotEmpty) {
+            element = dom.Element.tag('a')..attributes['href'] = m.group(1)!;
+          }
+        }
         if (!completer.isCompleted) completer.complete(element);
       } else {
         if (!completer.isCompleted) completer.complete(null);

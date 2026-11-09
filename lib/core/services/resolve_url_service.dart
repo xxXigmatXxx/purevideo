@@ -156,6 +156,66 @@ class ResolveUrlService {
 
 
 
+  static void _bysePowIsolateEntry(List<dynamic> args) {
+    final SendPort sendPort = args[0] as SendPort;
+    final String nonce = args[1] as String;
+    final int difficulty = args[2] as int;
+    final int start = args[3] as int;
+    final int step = args[4] as int;
+    final ans = _solveBysePowWorker(nonce, difficulty, start, step);
+    if (ans != null) {
+      sendPort.send(ans);
+    }
+  }
+
+  static Future<String> _solveBysePowInParallel(
+      String nonce, int difficulty) async {
+    if (difficulty <= 0) return '0';
+    final receivePort = ReceivePort();
+    final isolates = <Isolate>[];
+    final completer = Completer<String>();
+
+    void cleanup() {
+      for (final iso in isolates) {
+        try {
+          iso.kill(priority: Isolate.immediate);
+        } catch (_) {}
+      }
+      isolates.clear();
+      try {
+        receivePort.close();
+      } catch (_) {}
+    }
+
+    receivePort.listen((message) {
+      if (message is String && message.isNotEmpty && !completer.isCompleted) {
+        completer.complete(message);
+        cleanup();
+      }
+    });
+
+    try {
+      const workerCount = 4;
+      for (int w = 0; w < workerCount; w++) {
+        final iso = await Isolate.spawn(
+          _bysePowIsolateEntry,
+          [receivePort.sendPort, nonce, difficulty, w, workerCount],
+        );
+        isolates.add(iso);
+      }
+      return await completer.future.timeout(
+        const Duration(seconds: 16),
+        onTimeout: () {
+          cleanup();
+          return '0';
+        },
+      );
+    } catch (_) {
+      cleanup();
+      return '0';
+    }
+  }
+
   // Register-inlined zero-allocation PoW worker executed inside background Isolates!
   static String? _solveBysePowWorker(
       String nonce, int difficulty, int start, int step) {
@@ -181,7 +241,7 @@ class ResolveUrlService {
     final digits = Uint8List(12);
     final limit = 1 << (32 - difficulty);
 
-    for (int s = start; s < 400000; s += step) {
+    for (int s = start; s < 800000; s += step) {
       int dLen = 0;
       if (s == 0) {
         digits[0] = 48;
@@ -499,22 +559,8 @@ class ResolveUrlService {
           final diff = (capJson['pow_difficulty'] as num?)?.toInt() ?? 12;
           final powToken = (capJson['pow_token'] ?? '').toString();
           if (nonce.isNotEmpty && powToken.isNotEmpty) {
-            // Solve PoW across 2 parallel background isolates so the main UI thread never freezes!
-            final c = Completer<String>();
-            for (int w = 0; w < 2; w++) {
-              final workerStart = w;
-              Isolate.run(
-                () => _solveBysePowWorker(nonce, diff, workerStart, 2),
-              ).then((ans) {
-                if (ans != null && !c.isCompleted) {
-                  c.complete(ans);
-                }
-              }).catchError((_) {});
-            }
-            final solution = await c.future.timeout(
-              const Duration(seconds: 10),
-              onTimeout: () => '0',
-            );
+            // Solve PoW across 4 parallel background isolates and kill remaining workers immediately once solved!
+            final solution = await _solveBysePowInParallel(nonce, diff);
 
             final verResp = await _extDio.post<String>(
               '$origin/api/videos/$code/embed/captcha/verify',
@@ -611,6 +657,25 @@ class ResolveUrlService {
       {bool allowByse = true}) async {
     try {
       var currentUrl = cleanedUrl;
+      if (allowByse &&
+          (currentUrl.contains('mfw09.') || currentUrl.contains('byse'))) {
+        final fastUri = Uri.tryParse(currentUrl);
+        if (fastUri != null && fastUri.host.isNotEmpty) {
+          final fastOrigin = '${fastUri.scheme}://${fastUri.host}';
+          final fastByse = await _resolveByseInDart(
+            link,
+            currentUrl,
+            fastOrigin,
+            {
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              'Referer': fastOrigin,
+              'Origin': fastOrigin,
+            },
+          );
+          if (fastByse.isNotEmpty) return fastByse;
+        }
+      }
       var html = '';
       for (int hop = 0; hop < 4; hop++) {
         final resp = await _extDio.get<String>(

@@ -240,7 +240,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       if (!event.movie.isSeries) {
         var updatedMovie = await _videoSourceRepository
             .scrapeVideoUrls(event.movie)
-            .timeout(const Duration(seconds: 22), onTimeout: () => event.movie);
+            .timeout(const Duration(seconds: 32), onTimeout: () => event.movie);
 
         // If primary service links failed to resolve and we still have unqueried Ekino entries, fallback to Ekino!
         if ((updatedMovie.directUrls == null ||
@@ -263,7 +263,7 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
             updatedMovie = await _videoSourceRepository
                 .scrapeVideoUrls(withEkino)
                 .timeout(
-                  const Duration(seconds: 22),
+                  const Duration(seconds: 32),
                   onTimeout: () => withEkino,
                 );
           }

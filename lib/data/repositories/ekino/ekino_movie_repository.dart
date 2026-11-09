@@ -34,7 +34,6 @@ class EkinoMovieRepository implements MovieRepository {
       getIt<Map<SupportedService, AuthRepository>>()[SupportedService.ekino]!;
   Dio? _dio;
   final Map<String, String> _sessionCookies = {};
-  bool _hasVerifiedTurnstileSession = false;
 
   static const Set<String> _deadHosts = {
     'upzone',
@@ -105,9 +104,6 @@ class EkinoMovieRepository implements MovieRepository {
           final k = part.substring(0, idx).trim();
           final v = part.substring(idx + 1).trim();
           if (k.isNotEmpty && v.isNotEmpty && v != 'deleted') {
-            if (k.toUpperCase() == 'PHPSESSID' && !_hasVerifiedTurnstileSession) {
-              continue;
-            }
             map[k] = v;
           }
         }
@@ -131,9 +127,6 @@ class EkinoMovieRepository implements MovieRepository {
             c.value.isNotEmpty &&
             c.value != 'deleted') {
           _sessionCookies[c.name] = c.value;
-          if (c.name.toUpperCase() == 'PHPSESSID') {
-            _hasVerifiedTurnstileSession = true;
-          }
         }
       }
       _applySessionCookiesToDio();
@@ -157,12 +150,16 @@ class EkinoMovieRepository implements MovieRepository {
             _sessionCookies.remove(name);
             continue;
           }
-          // Do not save unverified PHPSESSID from normal GETs — it forces Turnstile early!
-          if (name.toUpperCase() == 'PHPSESSID') {
-            continue;
-          }
           if (name.isNotEmpty && value.isNotEmpty) {
             _sessionCookies[name] = value;
+            try {
+              CookieManager.instance().setCookie(
+                url: WebUri(SupportedService.ekino.baseUrl),
+                name: name,
+                value: value,
+                path: '/',
+              );
+            } catch (_) {}
           }
         }
       }
@@ -171,10 +168,12 @@ class EkinoMovieRepository implements MovieRepository {
   }
 
   Future<void> _prepareDio() async {
+    await WebViewService.ensureCleanUserAgent();
     _dio ??= EkinoDioFactory.getDio(
       _authRepository.getAccount(),
     );
     _dio!.options.headers['User-Agent'] = WebViewService.cleanUserAgent;
+    await _syncCookiesFromWebView();
     _applySessionCookiesToDio();
   }
 
@@ -269,18 +268,13 @@ class EkinoMovieRepository implements MovieRepository {
             : '${SupportedService.ekino.baseUrl}$pageUrl')
         : '${SupportedService.ekino.baseUrl}/';
 
-    for (final cand in candidates) {
+    for (int cIdx = 0; cIdx < candidates.length; cIdx++) {
+      var cand = candidates[cIdx];
       if (turnstileCancelled) break;
       if (videoUrls.length >= 2 || gatesQueried >= 3) break;
-      // If we already got a live 1st-party mfw09/byse link, conserve gate quota unless session is verified
-      if (videoUrls.any((v) =>
-              v.url.contains('mfw09.') || v.url.contains('byse')) &&
-          (!_hasVerifiedTurnstileSession || videoUrls.length >= 2)) {
-        break;
-      }
       gatesQueried++;
 
-      final gateUrl = '/watch/f/${cand.hostName}/${cand.hostId}';
+      var gateUrl = '/watch/f/${cand.hostName}/${cand.hostId}';
       String? videoUrl;
       try {
         final gateResp = await _dio!.get(
@@ -296,9 +290,6 @@ class EkinoMovieRepository implements MovieRepository {
             !turnstileAttempted &&
             videoUrls.isEmpty) {
           turnstileAttempted = true;
-          _sessionCookies.remove('PHPSESSID');
-          _hasVerifiedTurnstileSession = false;
-          _applySessionCookiesToDio();
           final elem = await getIt<WebViewService>().waitForDomElement(
             '${SupportedService.ekino.baseUrl}$gateUrl',
             'a.buttonprch',
@@ -308,6 +299,37 @@ class EkinoMovieRepository implements MovieRepository {
           if (videoUrl == null || videoUrl.isEmpty) {
             turnstileCancelled = true;
             break;
+          }
+          if (videoUrl == 'VERIFIED_SESSION') {
+            videoUrl = null;
+            if (pageUrl != null && pageUrl.isNotEmpty) {
+              final freshResp = await _dio!.get(pageUrl);
+              _saveSetCookiesFromResponse(freshResp);
+              final freshMatches = RegExp(
+                r"ShowPlayer\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)",
+              ).allMatches(freshResp.data?.toString() ?? '');
+              for (final fm in freshMatches) {
+                final fh = (fm.group(1) ?? '').trim();
+                final fid = (fm.group(2) ?? '').trim();
+                if (fh.toLowerCase() == cand.hostName.toLowerCase() &&
+                    fid.isNotEmpty) {
+                  gateUrl = '/watch/f/$fh/$fid';
+                  break;
+                }
+              }
+            }
+            final retryGateResp = await _dio!.get(
+              gateUrl,
+              options: Options(headers: {'Referer': refererUrl}),
+            );
+            _saveSetCookiesFromResponse(retryGateResp);
+            final retryGateDoc = html.parse(retryGateResp.data);
+            videoUrl = retryGateDoc
+                    .querySelector('a.buttonprch')
+                    ?.attributes['href'] ??
+                retryGateDoc
+                    .querySelector('a[href*="play.ekino"]')
+                    ?.attributes['href'];
           }
         }
 
