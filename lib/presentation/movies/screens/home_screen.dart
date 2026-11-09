@@ -179,6 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final url = s.url.toLowerCase();
       if (cat.contains('serial') ||
           url.contains('/s/') ||
+          url.contains('/serie/') ||
           url.contains('serial')) {
         return true;
       }

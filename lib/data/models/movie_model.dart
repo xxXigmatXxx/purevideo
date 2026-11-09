@@ -210,7 +210,7 @@ class MovieDetailsModel {
 
   final List<VideoSource>? directUrls;
 
-  bool get isSeries => services.first.isSeries;
+  bool get isSeries => services.any((s) => s.isSeries);
 
   final List<SeasonModel>? seasons;
 

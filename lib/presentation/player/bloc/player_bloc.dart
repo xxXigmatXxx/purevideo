@@ -291,22 +291,60 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
       if (_seasonIndex != null && _episodeIndex != null) {
         final episodes = <EpisodeModel>[];
+        final combinedSeasons = _movie!.seasons;
+        final targetSeason = (combinedSeasons != null &&
+                _seasonIndex! < combinedSeasons.length)
+            ? combinedSeasons[_seasonIndex!]
+            : null;
+        final targetEpisode = (targetSeason != null &&
+                _episodeIndex! < targetSeason.episodes.length)
+            ? targetSeason.episodes[_episodeIndex!]
+            : null;
+
         for (final service in _movie!.services) {
           final movieRepository = _movieRepositories[service.service];
           if (movieRepository == null) continue;
-          if (service.seasons == null ||
-              _seasonIndex! >= service.seasons!.length) {
-            continue;
+          final svcSeasons = service.seasons;
+          if (svcSeasons == null || svcSeasons.isEmpty) continue;
+
+          SeasonModel? season;
+          if (targetSeason != null) {
+            for (final s in svcSeasons) {
+              if (s.number == targetSeason.number) {
+                season = s;
+                break;
+              }
+            }
           }
-          final season = service.seasons![_seasonIndex!];
-          if (_episodeIndex! >= season.episodes.length) continue;
-          final episode = season.episodes[_episodeIndex!];
+          season ??= (_seasonIndex! < svcSeasons.length)
+              ? svcSeasons[_seasonIndex!]
+              : null;
+          if (season == null || season.episodes.isEmpty) continue;
+
+          EpisodeModel? episode;
+          if (targetEpisode != null) {
+            for (final e in season.episodes) {
+              if (e.number == targetEpisode.number) {
+                episode = e;
+                break;
+              }
+            }
+          }
+          episode ??= (_episodeIndex! < season.episodes.length)
+              ? season.episodes[_episodeIndex!]
+              : null;
+          if (episode == null) continue;
+
           if (episode.videoUrls != null && episode.videoUrls!.isNotEmpty) {
             episodes.add(episode);
           } else {
-            final episodeWithHosts =
-                await movieRepository.getEpisodeHosts(episode);
-            episodes.add(episodeWithHosts);
+            try {
+              final episodeWithHosts =
+                  await movieRepository.getEpisodeHosts(episode);
+              episodes.add(episodeWithHosts);
+            } catch (e) {
+              debugPrint('Error loading episode hosts (${service.service}): $e');
+            }
           }
         }
 

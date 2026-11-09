@@ -35,10 +35,12 @@ class MergeService {
   void _mergeIntoList(List<ServiceMovieModel> movies, List<MovieModel> target) {
     for (final movie in movies) {
       final normalizedTitle = _normalizeTitle(movie.title);
+      final isMovieSeries = _isSeriesEntry(movie);
       final existingMovieIndex = target.indexWhere(
         (existingMovie) =>
             _normalizeTitle(existingMovie.services.first.title) ==
-            normalizedTitle,
+                normalizedTitle &&
+            existingMovie.services.any(_isSeriesEntry) == isMovieSeries,
       );
 
       if (existingMovieIndex != -1) {
@@ -94,6 +96,15 @@ class MergeService {
   }
 
   List<MovieModel> get getMovies => _movies;
+
+  bool _isSeriesEntry(ServiceMovieModel m) {
+    final u = m.url.toLowerCase();
+    final c = (m.category ?? '').toLowerCase();
+    return u.contains('/serie/') ||
+        u.contains('/s/') ||
+        u.contains('serial') ||
+        c.contains('serial');
+  }
 
   String _normalizeTitle(String title) {
     return removeDiacritics(title

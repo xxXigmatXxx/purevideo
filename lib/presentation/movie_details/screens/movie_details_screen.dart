@@ -434,16 +434,37 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
         return FutureBuilder<List<VideoSource>>(
           future: () async {
             final eps = <EpisodeModel>[];
+            final targetSeasonNum =
+                (movie.seasons != null && seasonIdx < movie.seasons!.length)
+                    ? movie.seasons![seasonIdx].number
+                    : (seasonIdx + 1);
+            final targetEpNum = episode.number;
             for (final service in movie.services) {
               final repo = movieRepositories[service.service];
               if (repo == null) continue;
-              if (service.seasons == null ||
-                  seasonIdx >= service.seasons!.length) {
-                continue;
+              final svcSeasons = service.seasons;
+              if (svcSeasons == null || svcSeasons.isEmpty) continue;
+              SeasonModel? season;
+              for (final s in svcSeasons) {
+                if (s.number == targetSeasonNum) {
+                  season = s;
+                  break;
+                }
               }
-              final season = service.seasons![seasonIdx];
-              if (episodeIndex >= season.episodes.length) continue;
-              final ep = season.episodes[episodeIndex];
+              season ??=
+                  (seasonIdx < svcSeasons.length) ? svcSeasons[seasonIdx] : null;
+              if (season == null || season.episodes.isEmpty) continue;
+              EpisodeModel? ep;
+              for (final e in season.episodes) {
+                if (e.number == targetEpNum) {
+                  ep = e;
+                  break;
+                }
+              }
+              ep ??= (episodeIndex < season.episodes.length)
+                  ? season.episodes[episodeIndex]
+                  : null;
+              if (ep == null) continue;
               try {
                 final withHosts = await repo.getEpisodeHosts(ep);
                 eps.add(withHosts);

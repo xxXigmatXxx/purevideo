@@ -36,6 +36,7 @@ class EkinoMovieRepository implements MovieRepository {
   final Map<String, String> _sessionCookies = {};
 
   static const Set<String> _deadHosts = {
+    'playtube',
     'upzone',
     'hqq',
     'flashx',
@@ -82,6 +83,10 @@ class EkinoMovieRepository implements MovieRepository {
         )
         .trim();
     return t.isEmpty ? rawTitle.trim() : t;
+  }
+
+  String _sanitizeUrl(String raw) {
+    return raw.trim().replaceAll('[', '%5B').replaceAll(']', '%5D');
   }
 
   String _normalizeImageUrl(String raw) {
@@ -199,19 +204,30 @@ class EkinoMovieRepository implements MovieRepository {
     final tabPanes =
         document.querySelectorAll('.tab-content .tab-pane[role="tabpanel"]');
     final playerTabs = document.querySelectorAll('#myTab li');
+    final tabByHref = <String, dom.Element>{};
+    for (final li in playerTabs) {
+      final href = (li.querySelector('a')?.attributes['href'] ?? '').trim();
+      if (href.startsWith('#') && href.length > 1) {
+        tabByHref[href.substring(1)] = li;
+      }
+    }
 
     final rawCandidates = <_EkinoTabCandidate>[];
 
-    for (int i = 0; i < tabPanes.length && i < playerTabs.length; i++) {
+    for (int i = 0; i < tabPanes.length; i++) {
       final tabPane = tabPanes[i];
-      final playerTab = playerTabs[i];
-
-      final tabId = tabPane.attributes['id'] ?? '';
+      final tabId = (tabPane.attributes['id'] ?? '').trim();
       if (tabId.isEmpty || tabId == 'premium' || tabId == 'rek') continue;
 
-      final onclickLink = tabPane.querySelector('a[onclick]');
+      final playerTab =
+          tabByHref[tabId] ?? (i < playerTabs.length ? playerTabs[i] : null);
+
+      final onclickLink =
+          tabPane.querySelector('a[onclick]') ?? tabPane.querySelector('a[onClick]');
       if (onclickLink == null) continue;
-      final onclick = onclickLink.attributes['onclick'] ?? '';
+      final onclick = onclickLink.attributes['onclick'] ??
+          onclickLink.attributes['onClick'] ??
+          '';
       if (onclick.isEmpty) continue;
 
       final onclickMatch = RegExp(
@@ -226,10 +242,10 @@ class EkinoMovieRepository implements MovieRepository {
       final lowerHost = hostName.toLowerCase();
       if (_deadHosts.any((dead) => lowerHost.contains(dead))) continue;
 
-      final languageIcon = playerTab.querySelector('i.glyphicon');
+      final languageIcon = playerTab?.querySelector('i.glyphicon');
       final language = languageIcon?.attributes['title']?.trim() ?? 'PL';
 
-      final qualityIcon = playerTab.querySelector('img');
+      final qualityIcon = playerTab?.querySelector('img');
       final quality = qualityIcon?.attributes['title']?.trim() ?? 'HD';
 
       rawCandidates.add(_EkinoTabCandidate(
@@ -303,7 +319,7 @@ class EkinoMovieRepository implements MovieRepository {
           if (videoUrl == 'VERIFIED_SESSION') {
             videoUrl = null;
             if (pageUrl != null && pageUrl.isNotEmpty) {
-              final freshResp = await _dio!.get(pageUrl);
+              final freshResp = await _dio!.get(_sanitizeUrl(pageUrl));
               _saveSetCookiesFromResponse(freshResp);
               final freshMatches = RegExp(
                 r"ShowPlayer\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)",
@@ -383,14 +399,14 @@ class EkinoMovieRepository implements MovieRepository {
   @override
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     await _prepareDio();
-
-    final episodeResponse = await _dio!.get(episode.url);
+    final safeEpisodeUrl = _sanitizeUrl(episode.url);
+    final episodeResponse = await _dio!.get(safeEpisodeUrl);
     _saveSetCookiesFromResponse(episodeResponse);
     final document = html.parse(episodeResponse.data);
 
     final videoUrls = await _extractHostLinksFromDocument(
       document,
-      pageUrl: episode.url,
+      pageUrl: safeEpisodeUrl,
     );
 
     return episode.copyWith(
@@ -401,12 +417,13 @@ class EkinoMovieRepository implements MovieRepository {
   @override
   Future<ServiceMovieDetailsModel> getMovieDetails(String url) async {
     await _prepareDio();
-
-    final response = await _dio!.get(url);
+    final safeUrl = _sanitizeUrl(url);
+    final response = await _dio!.get(safeUrl);
     _saveSetCookiesFromResponse(response);
     final document = html.parse(response.data);
 
-    final titleElement = document.querySelector('h1.title');
+    final titleElement =
+        document.querySelector('h1.title') ?? document.querySelector('h1');
     final title = titleElement?.text.trim() ?? 'Brak tytułu';
     final cleanTitle = _cleanTitle(title);
 
@@ -426,83 +443,135 @@ class EkinoMovieRepository implements MovieRepository {
     final imageUrl =
         _normalizeImageUrl(posterElement?.attributes['src'] ?? '');
 
-    final isSeries = document.querySelector('#list-series') != null;
+    final seriesContainer = document.querySelector('#list-series');
+    final isSeries = seriesContainer != null || safeUrl.contains('/serie/');
 
     if (isSeries) {
       final seasons = <SeasonModel>[];
-      final seriesContainer = document.querySelector('#list-series');
-
       if (seriesContainer != null) {
         final children = seriesContainer.children;
-        for (int i = 0; i < children.length; i += 2) {
-          final seasonElement = children[i];
-          if (seasonElement.localName != 'p') continue;
+        int i = 0;
+        while (i < children.length) {
+          final child = children[i];
+          if (child.localName == 'p') {
+            final seasonName = child.text.trim();
+            final seasonNumberMatch =
+                RegExp(r'(\d+)').firstMatch(seasonName);
+            final seasonNumber = seasonNumberMatch != null
+                ? int.tryParse(seasonNumberMatch.group(1) ?? '1') ?? 1
+                : (seasons.length + 1);
 
-          final seasonName = seasonElement.text.trim();
-          if (i + 1 >= children.length) continue;
+            dom.Element? episodesList;
+            for (int j = i + 1; j < children.length; j++) {
+              if (children[j].localName == 'p') break;
+              if (children[j].localName == 'ul') {
+                episodesList = children[j];
+                i = j;
+                break;
+              }
+            }
 
-          final episodesList = children[i + 1];
-          if (episodesList.localName != 'ul' ||
-              !episodesList.classes.contains('list-series')) {
-            continue;
+            if (episodesList != null) {
+              final episodes = <EpisodeModel>[];
+              for (final episodeItem in episodesList.children) {
+                final episodeLink = episodeItem.querySelector('a');
+                if (episodeLink == null) continue;
+                final rawEpUrl = (episodeLink.attributes['href'] ?? '').trim();
+                if (rawEpUrl.isEmpty) continue;
+                final episodeUrl = _sanitizeUrl(rawEpUrl);
+
+                final episodeTitle = episodeLink.text.trim();
+                final episodeNumberDiv = episodeItem.querySelector('div');
+                final numMatch = RegExp(r'(\d+)')
+                    .firstMatch(episodeNumberDiv?.text ?? episodeTitle);
+                final episodeNumber = numMatch != null
+                    ? int.tryParse(numMatch.group(1) ?? '0') ??
+                        (episodes.length + 1)
+                    : (episodes.length + 1);
+
+                episodes.add(EpisodeModel(
+                  title: episodeTitle.isEmpty
+                      ? 'Odcinek $episodeNumber'
+                      : episodeTitle,
+                  number: episodeNumber,
+                  url: episodeUrl,
+                  videoUrls: [],
+                ));
+              }
+
+              if (episodes.isNotEmpty) {
+                episodes.sort((a, b) => a.number.compareTo(b.number));
+                seasons.add(SeasonModel(
+                  number: seasonNumber,
+                  episodes: episodes,
+                ));
+              }
+            }
           }
+          i++;
+        }
 
-          final seasonNumberMatch =
-              RegExp(r'Sezon (\d+)').firstMatch(seasonName);
-          final seasonNumber = seasonNumberMatch != null
-              ? int.tryParse(seasonNumberMatch.group(1) ?? '0') ?? 0
-              : 0;
-
-          final episodes = <EpisodeModel>[];
-
-          for (final episodeItem in episodesList.children) {
-            final episodeLink = episodeItem.querySelector('a');
-            if (episodeLink == null) continue;
-
-            final episodeUrl = episodeLink.attributes['href'] ?? '';
-            if (episodeUrl.isEmpty) continue;
-
-            final episodeTitle = episodeLink.text.trim();
-            final episodeNumberDiv = episodeItem.querySelector('div');
-            final episodeNumber = episodeNumberDiv != null
-                ? int.tryParse(episodeNumberDiv.text.trim()) ?? 0
-                : 0;
-
-            episodes.add(EpisodeModel(
-              title: episodeTitle,
-              number: episodeNumber,
-              url: episodeUrl,
-              videoUrls: [],
-            ));
+        if (seasons.isEmpty) {
+          final ulLists = seriesContainer.querySelectorAll('ul.list-series');
+          for (int sIdx = 0; sIdx < ulLists.length; sIdx++) {
+            final episodes = <EpisodeModel>[];
+            for (final episodeItem in ulLists[sIdx].children) {
+              final episodeLink = episodeItem.querySelector('a');
+              if (episodeLink == null) continue;
+              final rawEpUrl = (episodeLink.attributes['href'] ?? '').trim();
+              if (rawEpUrl.isEmpty) continue;
+              final episodeUrl = _sanitizeUrl(rawEpUrl);
+              final episodeTitle = episodeLink.text.trim();
+              final episodeNumberDiv = episodeItem.querySelector('div');
+              final numMatch = RegExp(r'(\d+)')
+                  .firstMatch(episodeNumberDiv?.text ?? episodeTitle);
+              final episodeNumber = numMatch != null
+                  ? int.tryParse(numMatch.group(1) ?? '0') ??
+                      (episodes.length + 1)
+                  : (episodes.length + 1);
+              episodes.add(EpisodeModel(
+                title: episodeTitle.isEmpty
+                    ? 'Odcinek $episodeNumber'
+                    : episodeTitle,
+                number: episodeNumber,
+                url: episodeUrl,
+                videoUrls: [],
+              ));
+            }
+            if (episodes.isNotEmpty) {
+              episodes.sort((a, b) => a.number.compareTo(b.number));
+              seasons.add(SeasonModel(
+                number: sIdx + 1,
+                episodes: episodes,
+              ));
+            }
           }
-
-          seasons.add(SeasonModel(
-            number: seasonNumber,
-            episodes: episodes.reversed.toList(),
-          ));
         }
       }
 
+      seasons.sort((a, b) => a.number.compareTo(b.number));
+
       return ServiceMovieDetailsModel(
         service: SupportedService.ekino,
-        url: url,
+        url: safeUrl,
         title: cleanTitle,
         description: description,
         imageUrl: imageUrl,
         isSeries: true,
-        seasons: seasons.reversed.toList(),
+        seasons: seasons,
       );
     }
 
     final videoUrls = await _extractHostLinksFromDocument(
       document,
-      pageUrl: url,
+      pageUrl: safeUrl,
     );
+
     debugPrint('Extracted Ekino video URLs: $videoUrls');
 
     return ServiceMovieDetailsModel(
       service: SupportedService.ekino,
-      url: url,
+      url: safeUrl,
       title: cleanTitle,
       description: description,
       imageUrl: imageUrl,
@@ -511,11 +580,102 @@ class EkinoMovieRepository implements MovieRepository {
     );
   }
 
+  Future<List<ServiceMovieModel>> _fetchSeriesPage() async {
+    try {
+      final resp =
+          await _dio!.get('/serie/').timeout(const Duration(seconds: 12));
+      _saveSetCookiesFromResponse(resp);
+      final doc = html.parse(resp.data);
+      final list = <ServiceMovieModel>[];
+      final seenUrls = <String>{};
+
+      // 1. Top slider (#posters a)
+      for (final a in doc.querySelectorAll('#posters a')) {
+        final rawUrl = (a.attributes['href'] ?? '').trim();
+        if (rawUrl.isEmpty || !rawUrl.contains('/serie/show/')) continue;
+        final url = rawUrl.endsWith('/') ? rawUrl : '$rawUrl/';
+        if (!seenUrls.add(url)) continue;
+
+        final rawImg = a.querySelector('img')?.attributes['src'] ?? '';
+        final imageUrl = _normalizeImageUrl(rawImg);
+        final rawTitle = (a.attributes['title'] ?? a.text)
+            .replaceFirst(RegExp(r'^Oglądaj:\s*', caseSensitive: false), '')
+            .trim();
+        final cleanTitle = _cleanTitle(rawTitle);
+        if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
+
+        list.add(ServiceMovieModel(
+          service: SupportedService.ekino,
+          title: cleanTitle,
+          imageUrl: imageUrl,
+          url: url,
+          category: 'Popularne seriale',
+        ));
+      }
+
+      // 2. .movies-list-item on /serie/
+      for (final movieElement in doc.querySelectorAll('.movies-list-item')) {
+        final coverElement = movieElement.querySelector('.cover-list a');
+        if (coverElement == null) continue;
+        final rawUrl = (coverElement.attributes['href'] ?? '').trim();
+        if (rawUrl.isEmpty || !rawUrl.contains('/serie/show/')) continue;
+        final url = rawUrl.endsWith('/') ? rawUrl : '$rawUrl/';
+        if (!seenUrls.add(url)) continue;
+
+        final rawImg =
+            coverElement.querySelector('img')?.attributes['src'] ?? '';
+        final imageUrl = _normalizeImageUrl(rawImg);
+        final titleElement =
+            movieElement.querySelector('.opis-list .title a') ??
+                movieElement.querySelector('.title a');
+        if (titleElement == null) continue;
+        final cleanTitle = _cleanTitle(titleElement.text);
+        if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
+
+        list.add(ServiceMovieModel(
+          service: SupportedService.ekino,
+          title: cleanTitle,
+          imageUrl: imageUrl,
+          url: url,
+          category: 'Seriale',
+        ));
+      }
+
+      // 3. Popularne sidebar (.row.lspc)
+      for (final row in doc.querySelectorAll('.row.lspc')) {
+        final a = row.querySelector('a.b');
+        if (a == null) continue;
+        final rawUrl = (a.attributes['href'] ?? '').trim();
+        if (rawUrl.isEmpty || !rawUrl.contains('/serie/show/')) continue;
+        final url = rawUrl.endsWith('/') ? rawUrl : '$rawUrl/';
+        if (!seenUrls.add(url)) continue;
+
+        final rawImg = row.querySelector('img')?.attributes['src'] ?? '';
+        final imageUrl = _normalizeImageUrl(rawImg);
+        final cleanTitle = _cleanTitle(a.text);
+        if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
+
+        list.add(ServiceMovieModel(
+          service: SupportedService.ekino,
+          title: cleanTitle,
+          imageUrl: imageUrl,
+          url: url,
+          category: 'Popularne seriale',
+        ));
+      }
+
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<ServiceMovieModel>> _fetchCategoryPage(
       String path, String categoryLabel) async {
     try {
-      final resp =
-          await _dio!.get(path).timeout(const Duration(seconds: 12));
+      final resp = await _dio!
+          .get(_sanitizeUrl(path))
+          .timeout(const Duration(seconds: 12));
       _saveSetCookiesFromResponse(resp);
       final doc = html.parse(resp.data);
       final list = <ServiceMovieModel>[];
@@ -527,7 +687,9 @@ class EkinoMovieRepository implements MovieRepository {
         final rawImg =
             coverElement.querySelector('img')?.attributes['src'] ?? '';
         final imageUrl = _normalizeImageUrl(rawImg);
-        final titleElement = movieElement.querySelector('.opis-list .title a');
+        final titleElement =
+            movieElement.querySelector('.opis-list .title a') ??
+                movieElement.querySelector('.title a');
         if (titleElement == null) continue;
         final cleanTitle = _cleanTitle(titleElement.text);
         if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
@@ -562,7 +724,6 @@ class EkinoMovieRepository implements MovieRepository {
           for (final section in movieSections) {
             final categoryElement = section.querySelector('h4');
             if (categoryElement == null) continue;
-
             final subCategoryElement = section.querySelector('span');
             String category =
                 categoryElement.text.replaceAll('!', '').trim();
@@ -576,7 +737,6 @@ class EkinoMovieRepository implements MovieRepository {
             for (final item in movieList.children) {
               final leftScope = item.querySelector('.scope_left');
               if (leftScope == null) continue;
-
               final link = leftScope.querySelector('a');
               if (link == null) continue;
 
@@ -585,12 +745,11 @@ class EkinoMovieRepository implements MovieRepository {
 
               final img = link.querySelector('img');
               if (img == null) continue;
-
               final imageUrl =
                   _normalizeImageUrl(img.attributes['src'] ?? '');
+
               final rawTitle = img.attributes['alt']?.trim() ?? '';
               final cleanTitle = _cleanTitle(rawTitle);
-
               if (cleanTitle.isEmpty || imageUrl.isEmpty) continue;
 
               movies.add(ServiceMovieModel(
@@ -607,6 +766,7 @@ class EkinoMovieRepository implements MovieRepository {
           return <ServiceMovieModel>[];
         }
       }(),
+      _fetchSeriesPage(),
       _fetchCategoryPage('/movie/cat/kategoria[2,5]', 'Bajki dla dzieci'),
       _fetchCategoryPage('/movie/cat/kategoria[12]', 'Familijne'),
       _fetchCategoryPage('/movie/cat/kategoria[1]', 'Akcja'),
@@ -619,12 +779,13 @@ class EkinoMovieRepository implements MovieRepository {
     return [
       ...results[1],
       ...results[2],
-      ...results[0],
       ...results[3],
+      ...results[0],
       ...results[4],
       ...results[5],
       ...results[6],
       ...results[7],
+      ...results[8],
     ];
   }
 }

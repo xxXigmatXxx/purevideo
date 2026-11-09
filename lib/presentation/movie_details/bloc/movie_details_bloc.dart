@@ -139,15 +139,19 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       final services = <ServiceMovieDetailsModel>[];
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
-      final ekinoEntries = event.movie.services
-          .where((s) => s.service == SupportedService.ekino)
+      final ekinoMovieEntries = event.movie.services
+          .where((s) =>
+              s.service == SupportedService.ekino &&
+              !s.url.toLowerCase().contains('/serie/'))
           .toList();
-      final nonEkinoEntries = event.movie.services
-          .where((s) => s.service != SupportedService.ekino)
+      final primaryEntries = event.movie.services
+          .where((s) =>
+              s.service != SupportedService.ekino ||
+              s.url.toLowerCase().contains('/serie/'))
           .toList();
-      _pendingEkinoEntries = ekinoEntries;
+      _pendingEkinoEntries = ekinoMovieEntries;
 
-      for (final serivceMovie in nonEkinoEntries) {
+      for (final serivceMovie in primaryEntries) {
         final authRepository = _authRepositories[serivceMovie.service];
         if (authRepository == null) continue;
         final account = authRepository.getAccount();
@@ -186,8 +190,8 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       // Load Ekino if there were no other services or if primary services returned no videoUrls
       final hasAnyUrls = services.any(
           (s) => s.isSeries || (s.videoUrls != null && s.videoUrls!.isNotEmpty));
-      if (!hasAnyUrls && ekinoEntries.isNotEmpty) {
-        final ekinoDetails = await _loadFirstValidEkinoDetails(ekinoEntries);
+      if (!hasAnyUrls && ekinoMovieEntries.isNotEmpty) {
+        final ekinoDetails = await _loadFirstValidEkinoDetails(ekinoMovieEntries);
         if (ekinoDetails != null) {
           services.add(ekinoDetails);
           _pendingEkinoEntries = const [];
