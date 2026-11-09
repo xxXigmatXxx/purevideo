@@ -195,24 +195,29 @@ class ResolveUrlService {
     });
 
     try {
-      const workerCount = 4;
+      const workerCount = 2;
       for (int w = 0; w < workerCount; w++) {
+        if (completer.isCompleted) break;
         final iso = await Isolate.spawn(
           _bysePowIsolateEntry,
           [receivePort.sendPort, nonce, difficulty, w, workerCount],
         );
+        if (completer.isCompleted) {
+          try {
+            iso.kill(priority: Isolate.immediate);
+          } catch (_) {}
+          break;
+        }
         isolates.add(iso);
       }
       return await completer.future.timeout(
-        const Duration(seconds: 16),
-        onTimeout: () {
-          cleanup();
-          return '0';
-        },
+        const Duration(seconds: 14),
+        onTimeout: () => '0',
       );
     } catch (_) {
-      cleanup();
       return '0';
+    } finally {
+      cleanup();
     }
   }
 
@@ -626,21 +631,52 @@ class ResolveUrlService {
       if (sources is! List || sources.isEmpty) return const [];
 
       final out = <VideoSource>[];
+      final byseStreamHeaders = <String, String>{
+        'User-Agent': baseHeaders['User-Agent']!,
+        'Referer': '$origin/',
+        'Origin': origin,
+      };
       for (final s in sources) {
         if (s is Map) {
           final sUrl = (s['url'] ?? '').toString().trim();
           if (sUrl.startsWith('http')) {
             final label = (s['label'] ?? link.quality).toString().trim();
+            var directStreamUrl = sUrl;
+            if (sUrl.contains('master.m3u8')) {
+              try {
+                final m3u8Resp = await _extDio.get<String>(
+                  sUrl,
+                  options: Options(
+                    headers: byseStreamHeaders,
+                    receiveTimeout: const Duration(seconds: 4),
+                  ),
+                );
+                final m3u8Body = m3u8Resp.data ?? '';
+                if (m3u8Body.contains('#EXT-X-STREAM-INF:')) {
+                  final lines = m3u8Body
+                      .split('\n')
+                      .map((l) => l.trim())
+                      .where((l) => l.isNotEmpty)
+                      .toList();
+                  for (int i = 0; i < lines.length - 1; i++) {
+                    if (lines[i].startsWith('#EXT-X-STREAM-INF:') &&
+                        !lines[i + 1].startsWith('#')) {
+                      final candidate = lines[i + 1];
+                      directStreamUrl = candidate.startsWith('http')
+                          ? candidate
+                          : Uri.parse(sUrl).resolve(candidate).toString();
+                      break;
+                    }
+                  }
+                }
+              } catch (_) {}
+            }
             out.add(VideoSource(
-              url: sUrl,
+              url: directStreamUrl,
               lang: link.lang,
               quality: label.isEmpty ? 'HD' : label,
               host: label.isEmpty ? 'Byse' : 'Byse ($label)',
-              headers: {
-                'User-Agent': baseHeaders['User-Agent']!,
-                'Referer': '$origin/',
-                'Origin': origin,
-              },
+              headers: byseStreamHeaders,
             ));
           }
         }

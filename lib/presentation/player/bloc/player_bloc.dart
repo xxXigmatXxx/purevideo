@@ -76,7 +76,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     on<CastVideo>(_onCastVideo);
   }
 
-  void _saveWatchedProgress([int? overrideSeconds]) {
+  bool _mediaItemAdded = false;
+
+  void _saveWatchedProgress([int? overrideSeconds, bool notify = false]) {
     if (_movie == null) return;
     try {
       final sec = overrideSeconds ?? _latestPosition.inSeconds;
@@ -91,9 +93,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
           _movie!.seasons![_seasonIndex!],
           _movie!.seasons![_seasonIndex!].episodes[_episodeIndex!],
           sec,
+          notify: notify,
         );
       } else {
-        watchedService.watchMovie(_movie!, sec);
+        watchedService.watchMovie(_movie!, sec, notify: notify);
       }
     } catch (e) {
       debugPrint('Error saving watched progress: $e');
@@ -102,7 +105,21 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
   @override
   Future<void> close() {
-    _saveWatchedProgress();
+    try {
+      _audioSession?.setActive(false);
+    } catch (_) {}
+    try {
+      _mediaService.audioHandler.playbackState.add(PlaybackState(
+        playing: false,
+      ));
+    } catch (_) {}
+    try {
+      state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
+    } catch (_) {}
+    _saveWatchedProgress(null, true);
+    try {
+      state.pipFramework.dispose();
+    } catch (_) {}
     _disposeMediaKit();
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
@@ -122,29 +139,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   Future<void> _initMediaKit() async {
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 128 * 1024 * 1024,
+        bufferSize: 32 * 1024 * 1024,
       ),
     );
-    try {
-      final dynamic nativePlayer = _player.platform;
-      await nativePlayer.setProperty('hwdec', 'auto-safe');
-      await nativePlayer.setProperty('audio-channels', 'stereo');
-      await nativePlayer.setProperty('audio-buffer', '0.5');
-      await nativePlayer.setProperty('cache', 'yes');
-      await nativePlayer.setProperty('cache-secs', '180');
-      await nativePlayer.setProperty('demuxer-readahead-secs', '180');
-      await nativePlayer.setProperty('demuxer-max-bytes', '134217728');
-      await nativePlayer.setProperty('demuxer-max-back-bytes', '33554432');
-      await nativePlayer.setProperty('cache-pause', 'yes');
-      await nativePlayer.setProperty('cache-pause-initial', 'yes');
-      await nativePlayer.setProperty('cache-pause-wait', '5');
-      await nativePlayer.setProperty(
-        'stream-lavf-o',
-        'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,multiple_requests=1,http_persistent=1',
-      );
-      await nativePlayer.setProperty('framedrop', 'vo');
-      await nativePlayer.setProperty('vd-lavc-threads', '0');
-    } catch (_) {}
 
     _controller = VideoController(
       _player,
@@ -152,6 +149,24 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         enableHardwareAcceleration: true,
       ),
     );
+
+    try {
+      final dynamic nativePlayer = _player.platform;
+      await nativePlayer.setProperty('audio-channels', 'stereo');
+      await nativePlayer.setProperty('cache', 'yes');
+      await nativePlayer.setProperty('cache-secs', '60');
+      await nativePlayer.setProperty('demuxer-readahead-secs', '30');
+      await nativePlayer.setProperty('demuxer-max-bytes', '33554432');
+      await nativePlayer.setProperty('demuxer-max-back-bytes', '16777216');
+      await nativePlayer.setProperty('cache-pause', 'yes');
+      await nativePlayer.setProperty('cache-pause-initial', 'no');
+      await nativePlayer.setProperty('cache-pause-wait', '1');
+      await nativePlayer.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_streamed=1,reconnect_delay_max=2',
+      );
+      await nativePlayer.setProperty('framedrop', 'vo');
+    } catch (_) {}
 
     _positionSubscription = _player.stream.position.listen((position) {
       _latestPosition = position;
@@ -163,7 +178,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     });
 
     _durationSubscription = _player.stream.duration.listen((duration) {
-      if (duration != state.duration) {
+      if (duration.inSeconds > 0 &&
+          duration.inSeconds != state.duration.inSeconds) {
         add(UpdateDuration(duration: duration));
       }
     });
@@ -578,7 +594,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   ) async {
     _latestPosition = event.position;
     final curSec = event.position.inSeconds;
-    if (curSec > 0 && (curSec - _lastSavedSecond).abs() >= 30) {
+    if (curSec > 0 && (curSec - _lastSavedSecond).abs() >= 180) {
       _lastSavedSecond = curSec;
       _saveWatchedProgress(curSec);
     }
@@ -597,14 +613,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       return;
     }
 
-    _mediaService.audioHandler.add(MediaItem(
-      id: _movie!.title,
-      title: _movie!.title,
-      artUri: Uri.parse(_movie!.imageUrl),
-      duration: state.duration,
-    ));
-
-    _updateNotification();
+    if (!_mediaItemAdded) {
+      _mediaItemAdded = true;
+      _mediaService.audioHandler.add(MediaItem(
+        id: _movie!.title,
+        title: _movie!.title,
+        artUri: Uri.parse(_movie!.imageUrl),
+        duration: state.duration,
+      ));
+      _updateNotification();
+    }
   }
 
   Future<void> _onUpdatePlayingState(
@@ -658,7 +676,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
     } catch (_) {}
 
-    _saveWatchedProgress();
+    _saveWatchedProgress(null, true);
 
     try {
       state.pipFramework.dispose();

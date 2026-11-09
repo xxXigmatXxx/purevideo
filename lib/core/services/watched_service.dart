@@ -235,7 +235,7 @@ class WatchedService {
     }
   }
 
-  void watchMovie(MovieDetailsModel movie, int watchedTime) {
+  void watchMovie(MovieDetailsModel movie, int watchedTime, {bool notify = true}) {
     try {
       final cleanMovie = _sanitizeMovie(movie);
       if (cleanMovie.services.isEmpty) return;
@@ -245,15 +245,6 @@ class WatchedService {
           ? watchedTime
           : max(existing?.watchedTime ?? 0, 120);
 
-      final existingKey = getKeyByMovie(cleanMovie);
-      if (existingKey != null) {
-        final oldMovie = box.get(existingKey);
-        if (oldMovie != null) {
-          _removeFromCache(oldMovie.movie);
-        }
-        box.delete(existingKey);
-      }
-
       final watchedMovie = WatchedMovieModel(
         movie: cleanMovie,
         watchedTime: effectiveTime,
@@ -262,9 +253,14 @@ class WatchedService {
             ? List<WatchedSeasonEpisode>.from(existing!.episodes!)
             : null,
       );
-      box.add(watchedMovie);
+      final existingKey = getKeyByMovie(cleanMovie);
+      if (existingKey != null) {
+        box.put(existingKey, watchedMovie);
+      } else {
+        box.add(watchedMovie);
+      }
       _addToCache(watchedMovie);
-      _notifyListeners();
+      if (notify) _notifyListeners();
     } catch (e) {
       debugPrint('Error in watchMovie: $e');
     }
@@ -274,8 +270,9 @@ class WatchedService {
     MovieDetailsModel movie,
     SeasonModel season,
     EpisodeModel episode,
-    int watchedTime,
-  ) {
+    int watchedTime, {
+    bool notify = true,
+  }) {
     try {
       final cleanMovie = _sanitizeMovie(movie);
       if (cleanMovie.services.isEmpty) return;
@@ -335,16 +332,12 @@ class WatchedService {
 
       final existingKey = getKeyByMovie(cleanMovie);
       if (existingKey != null) {
-        final oldMovie = box.get(existingKey);
-        if (oldMovie != null) {
-          _removeFromCache(oldMovie.movie);
-        }
-        box.delete(existingKey);
+        box.put(existingKey, watchedMovie);
+      } else {
+        box.add(watchedMovie);
       }
-
-      box.add(watchedMovie);
       _addToCache(watchedMovie);
-      _notifyListeners();
+      if (notify) _notifyListeners();
     } catch (e) {
       debugPrint('Error in watchEpisode: $e');
     }

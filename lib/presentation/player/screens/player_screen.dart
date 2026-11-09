@@ -72,7 +72,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    _playerBloc.add(const DisposePlayer());
+    _playerBloc.close();
     super.dispose();
   }
 
@@ -340,6 +340,7 @@ class _PlayerViewState extends State<PlayerView> {
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<PlayerBloc, PlayerState>(
+      listenWhen: (prev, curr) => prev.errorMessage != curr.errorMessage,
       listener: (context, state) {
         if (state.errorMessage != null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -347,6 +348,11 @@ class _PlayerViewState extends State<PlayerView> {
           );
         }
       },
+      buildWhen: (prev, curr) =>
+          prev.isLoading != curr.isLoading ||
+          prev.errorMessage != curr.errorMessage ||
+          prev.isImersive != curr.isImersive ||
+          prev.selectedSource != curr.selectedSource,
       builder: (context, state) {
         if (state.isLoading) {
           return _buildLoadingView(context, state);
@@ -571,7 +577,12 @@ class _PlayerViewState extends State<PlayerView> {
             ),
           ),
           RepaintBoundary(
-            child: SafeArea(child: _buildOverlay(context, state)),
+            child: SafeArea(
+              child: BlocBuilder<PlayerBloc, PlayerState>(
+                builder: (ctx, overlayState) =>
+                    _buildOverlay(ctx, overlayState),
+              ),
+            ),
           ),
         ],
       ),
