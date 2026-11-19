@@ -417,7 +417,15 @@ class ObejrzyjtoMovieRepository implements MovieRepository {
 
   ServiceMovieModel? _parseMovie(Map<String, dynamic> data, String? category) {
     final name = (data['name'] as String?)?.trim();
-    final poster = (data['poster'] as String?)?.trim();
+    var poster = (data['poster'] as String?)?.trim();
+    if (poster != null && poster.isNotEmpty) {
+      if (poster.startsWith('//')) {
+        poster = 'https:$poster';
+      } else if (poster.startsWith('/')) {
+        poster = '${SupportedService.obejrzyjto.baseUrl}$poster';
+      }
+      poster = MovieModel.normalizePosterUrl(poster);
+    }
 
     if (name == null || name.isEmpty || poster == null || poster.isEmpty) {
       return null;

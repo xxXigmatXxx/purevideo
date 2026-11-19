@@ -35,7 +35,13 @@ class EkinoSearchRepository extends SearchRepository {
   }
 
   String _cleanTitle(String raw) {
-    var t = raw.replaceAll('\u00a0', ' ').trim();
+    var t = raw;
+    if (t.contains('&')) {
+      try {
+        t = html.parseFragment(t).text ?? t;
+      } catch (_) {}
+    }
+    t = t.replaceAll('\u00a0', ' ').trim();
     if (t.contains(' / ')) {
       final first = t.split(' / ').first.trim();
       if (first.isNotEmpty) {

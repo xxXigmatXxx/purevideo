@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:purevideo/core/utils/device_utils.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/repositories/video_source_repository.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
@@ -54,23 +55,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
+  void _restoreOrientation() {
+    if (DeviceUtils.isTv) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  }
+
   @override
   void deactivate() {
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _restoreOrientation();
     super.deactivate();
   }
 
   @override
   void dispose() {
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _restoreOrientation();
 
     _playerBloc.close();
     super.dispose();
@@ -98,6 +107,8 @@ class _PlayerViewState extends State<PlayerView> {
   double _volume = 1.0;
   double _lastNonZeroVolume = 1.0;
   Timer? _seekReleaseTimer;
+  final FocusNode _rootFocusNode = FocusNode();
+  final FocusNode _playPauseFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -119,6 +130,8 @@ class _PlayerViewState extends State<PlayerView> {
   @override
   void dispose() {
     _seekReleaseTimer?.cancel();
+    _rootFocusNode.dispose();
+    _playPauseFocusNode.dispose();
     super.dispose();
   }
 
@@ -214,6 +227,8 @@ class _PlayerViewState extends State<PlayerView> {
                             : const Color(0xFF1F1F1F),
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
+                          autofocus: idx == 0 && DeviceUtils.isTv,
+                          focusColor: Colors.white24,
                           borderRadius: BorderRadius.circular(12),
                           onTap: () {
                             Navigator.of(ctx).pop();
@@ -564,27 +579,125 @@ class _PlayerViewState extends State<PlayerView> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          RepaintBoundary(
-            child: Video(
-              controller: bloc.controller,
-              controls: NoVideoControls,
-              fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
-              wakelock: true,
-            ),
-          ),
-          RepaintBoundary(
-            child: SafeArea(
-              child: BlocBuilder<PlayerBloc, PlayerState>(
-                builder: (ctx, overlayState) =>
-                    _buildOverlay(ctx, overlayState),
+    return BlocListener<PlayerBloc, PlayerState>(
+      listenWhen: (prev, curr) =>
+          prev.isOverlayVisible != curr.isOverlayVisible,
+      listener: (context, overlayState) {
+        if (!DeviceUtils.isTv) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (overlayState.isOverlayVisible) {
+            if (_playPauseFocusNode.canRequestFocus) {
+              _playPauseFocusNode.requestFocus();
+            }
+          } else {
+            if (_rootFocusNode.canRequestFocus) {
+              _rootFocusNode.requestFocus();
+            }
+          }
+        });
+      },
+      child: Focus(
+        focusNode: _rootFocusNode,
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          final key = event.logicalKey;
+          final curState = bloc.state;
+
+          if (event is KeyDownEvent) {
+            if (key == LogicalKeyboardKey.mediaPlayPause) {
+              bloc.add(const PlayPause());
+              bloc.add(const ShowControls());
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.mediaPlay) {
+              if (!curState.isPlaying) bloc.add(const PlayPause());
+              bloc.add(const ShowControls());
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.mediaPause) {
+              if (curState.isPlaying) bloc.add(const PlayPause());
+              bloc.add(const ShowControls());
+              return KeyEventResult.handled;
+            }
+          }
+
+          if (key == LogicalKeyboardKey.mediaRewind) {
+            bloc.add(const ShowControls());
+            bloc.add(const SeekWithDirection(isForward: false));
+            return KeyEventResult.handled;
+          }
+          if (key == LogicalKeyboardKey.mediaFastForward) {
+            bloc.add(const ShowControls());
+            bloc.add(const SeekWithDirection(isForward: true));
+            return KeyEventResult.handled;
+          }
+
+          if (!curState.isOverlayVisible) {
+            if (key == LogicalKeyboardKey.arrowLeft) {
+              bloc.add(const SeekWithDirection(isForward: false));
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.arrowRight) {
+              bloc.add(const SeekWithDirection(isForward: true));
+              return KeyEventResult.handled;
+            }
+            if (event is KeyDownEvent &&
+                (key == LogicalKeyboardKey.select ||
+                    key == LogicalKeyboardKey.enter ||
+                    key == LogicalKeyboardKey.numpadEnter ||
+                    key == LogicalKeyboardKey.space ||
+                    key == LogicalKeyboardKey.arrowUp ||
+                    key == LogicalKeyboardKey.arrowDown)) {
+              bloc.add(const ShowControls());
+              return KeyEventResult.handled;
+            }
+          } else if (event is KeyDownEvent &&
+              (key == LogicalKeyboardKey.escape ||
+                  key == LogicalKeyboardKey.goBack)) {
+            bloc.add(const HideControls());
+            return KeyEventResult.handled;
+          }
+
+          return KeyEventResult.ignored;
+        },
+        child: PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            if (bloc.state.isOverlayVisible) {
+              bloc.add(const HideControls());
+            } else {
+              Navigator.of(context).pop();
+            }
+          },
+          child: Scaffold(
+            backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              RepaintBoundary(
+                child: Video(
+                  controller: bloc.controller,
+                  controls: NoVideoControls,
+                  fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
+                  wakelock: true,
+                ),
               ),
-            ),
+              RepaintBoundary(
+                child: SafeArea(
+                  child: BlocBuilder<PlayerBloc, PlayerState>(
+                    builder: (ctx, overlayState) =>
+                        _buildOverlay(ctx, overlayState),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -608,33 +721,38 @@ class _PlayerViewState extends State<PlayerView> {
             _buildSeekingIndicator(state),
             _buildLoadingIndicator(state),
             _buildDoubleTapControls(bloc),
-            IgnorePointer(
-              ignoring: !state.isOverlayVisible,
-              child: AnimatedOpacity(
-                opacity: state.isOverlayVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 250),
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: [0.0, 0.25, 0.72, 1.0],
-                      colors: [
-                        Color(0xB3000000),
-                        Color(0x33000000),
-                        Color(0x33000000),
-                        Color(0xCC000000),
+            ExcludeFocus(
+              excluding: !state.isOverlayVisible,
+              child: IgnorePointer(
+                ignoring: !state.isOverlayVisible,
+                child: AnimatedOpacity(
+                  opacity: state.isOverlayVisible ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 250),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.0, 0.25, 0.72, 1.0],
+                        colors: [
+                          Color(0xB3000000),
+                          Color(0x33000000),
+                          Color(0x33000000),
+                          Color(0xCC000000),
+                        ],
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        _buildTopBar(context, state, bloc),
+                        _buildCenterControls(state, bloc),
+                        if (!DeviceUtils.isTv)
+                          _buildBrightnessControl(context, bloc),
+                        if (!DeviceUtils.isTv)
+                          _buildVolumeControl(context, bloc),
+                        _buildBottomBar(context, state, bloc),
                       ],
                     ),
-                  ),
-                  child: Stack(
-                    children: [
-                      _buildTopBar(context, state, bloc),
-                      _buildCenterControls(state, bloc),
-                      _buildBrightnessControl(context, bloc),
-                      _buildVolumeControl(context, bloc),
-                      _buildBottomBar(context, state, bloc),
-                    ],
                   ),
                 ),
               ),
@@ -933,6 +1051,7 @@ class _PlayerViewState extends State<PlayerView> {
         child: Row(
           children: [
             IconButton(
+              focusColor: Colors.white24,
               icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
               onPressed: () => Navigator.of(context).pop(),
             ),
@@ -959,6 +1078,7 @@ class _PlayerViewState extends State<PlayerView> {
                   const SizedBox(width: 4),
                 ],
                 IconButton(
+                  focusColor: Colors.white24,
                   tooltip: state.isImersive
                       ? 'Dopasuj obraz'
                       : 'Wypełnij ekran',
@@ -992,6 +1112,7 @@ class _PlayerViewState extends State<PlayerView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
+            focusColor: _kNetflixRed.withAlpha(110),
             icon: const Icon(Icons.replay_10),
             iconSize: 48,
             color: Colors.white,
@@ -1002,6 +1123,8 @@ class _PlayerViewState extends State<PlayerView> {
           ),
           const SizedBox(width: 42),
           IconButton(
+            focusNode: _playPauseFocusNode,
+            focusColor: _kNetflixRed.withAlpha(110),
             icon: Icon(state.isPlaying ? Icons.pause : Icons.play_arrow),
             iconSize: 72,
             color: Colors.white,
@@ -1009,6 +1132,7 @@ class _PlayerViewState extends State<PlayerView> {
           ),
           const SizedBox(width: 42),
           IconButton(
+            focusColor: _kNetflixRed.withAlpha(110),
             icon: const Icon(Icons.forward_10),
             iconSize: 48,
             color: Colors.white,

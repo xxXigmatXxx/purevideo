@@ -39,20 +39,78 @@ class MovieModel {
   @HiveField(0)
   final List<ServiceMovieModel> services;
 
+  static String normalizePosterUrl(String raw) {
+    var u = raw.trim();
+    if (u.isEmpty) return '';
+    if (u.startsWith('//')) u = 'https:$u';
+    if (u.startsWith('http://image.tmdb.org') ||
+        u.startsWith('http://ekino.ws') ||
+        u.startsWith('http://www.obejrzyj.to') ||
+        u.startsWith('http://obejrzyj.to') ||
+        u.startsWith('http://filman.cc')) {
+      u = u.replaceFirst('http://', 'https://');
+    }
+    if (u.contains('image.tmdb.org/t/p/original/')) {
+      u = u.replaceFirst(
+          'image.tmdb.org/t/p/original/', 'image.tmdb.org/t/p/w500/');
+    }
+    return u;
+  }
+
+  static Map<String, String> buildImageHeaders(
+      SupportedService service, String url) {
+    final headers = <String, String>{
+      'User-Agent':
+          'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+    };
+    final lower = url.toLowerCase();
+    final needsServiceCookies =
+        (service == SupportedService.filman && lower.contains('filman')) ||
+            (service == SupportedService.ekino && lower.contains('ekino'));
+    if (needsServiceCookies) {
+      final cookies = getIt<Map<SupportedService, AuthRepository>>()[service]
+          ?.getAccount()
+          ?.cookies;
+      if (cookies != null && cookies.isNotEmpty) {
+        final cookieStr = cookies
+            .where((c) => c.name.isNotEmpty && c.value.isNotEmpty)
+            .map((c) => '${c.name}=${c.value}')
+            .join('; ');
+        if (cookieStr.isNotEmpty) {
+          headers['Cookie'] = cookieStr;
+        }
+      }
+      if (service == SupportedService.ekino) {
+        headers['Referer'] = 'https://ekino.ws/';
+      } else if (service == SupportedService.filman) {
+        headers['Referer'] = 'https://filman.cc/';
+      }
+    }
+    return headers;
+  }
+
+  ServiceMovieModel get _bestPosterService {
+    for (final s in services) {
+      if (s.imageUrl.contains('tmdb.org') && s.imageUrl.trim().isNotEmpty) {
+        return s;
+      }
+    }
+    for (final s in services) {
+      if (s.imageUrl.trim().startsWith('http')) {
+        return s;
+      }
+    }
+    return services.first;
+  }
+
   String get title => services.first.title;
 
-  String get imageUrl => services.first.imageUrl;
+  String get imageUrl => normalizePosterUrl(_bestPosterService.imageUrl);
 
-  Map<String, String> get imageHeaders => {
-        'User-Agent':
-            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-        'Cookie': getIt<Map<SupportedService, AuthRepository>>()[
-                    services.first.service]
-                ?.getAccount()
-                ?.cookies
-                .join('; ') ??
-            '',
-      };
+  Map<String, String> get imageHeaders {
+    final best = _bestPosterService;
+    return buildImageHeaders(best.service, normalizePosterUrl(best.imageUrl));
+  }
 
   const MovieModel({
     required this.services,
@@ -190,20 +248,34 @@ class MovieDetailsModel {
 
   String get description => filmwebInfo?.plot ?? services.first.description;
 
-  Map<String, String> get imageHeaders => filmwebInfo?.posterUrl != null
-      ? {}
-      : {
-          'User-Agent':
-              'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-          'Cookie': getIt<Map<SupportedService, AuthRepository>>()[
-                      services.first.service]
-                  ?.getAccount()
-                  ?.cookies
-                  .join('; ') ??
-              '',
-        };
+  String get imageUrl {
+    if (filmwebInfo?.posterUrl != null &&
+        filmwebInfo!.posterUrl!.trim().isNotEmpty) {
+      return MovieModel.normalizePosterUrl(filmwebInfo!.posterUrl!);
+    }
+    for (final s in services) {
+      if (s.imageUrl.contains('tmdb.org') && s.imageUrl.trim().isNotEmpty) {
+        return MovieModel.normalizePosterUrl(s.imageUrl);
+      }
+    }
+    for (final s in services) {
+      if (s.imageUrl.trim().isNotEmpty) {
+        return MovieModel.normalizePosterUrl(s.imageUrl);
+      }
+    }
+    return '';
+  }
 
-  String get imageUrl => filmwebInfo?.posterUrl ?? services.first.imageUrl;
+  Map<String, String> get imageHeaders {
+    final u = imageUrl;
+    if (filmwebInfo?.posterUrl != null) {
+      return const {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+      };
+    }
+    return MovieModel.buildImageHeaders(services.first.service, u);
+  }
 
   List<HostLink>? get videoUrls =>
       services.expand((e) => e.videoUrls ?? const <HostLink>[]).toList();

@@ -1,15 +1,19 @@
 import 'dart:async';
-import 'package:fast_cached_network_image/fast_cached_network_image.dart';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
-import 'package:purevideo/core/utils/supported_enum.dart';
+import 'package:purevideo/core/utils/device_utils.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/models/watched_model.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
+import 'package:purevideo/presentation/global/widgets/poster_image.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_bloc.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_event.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_state.dart';
@@ -30,47 +34,44 @@ class MovieListItem extends StatelessWidget {
   final MovieModel movie;
   final String? bottomBadge;
   final int? topRank;
+  final bool autofocus;
 
   const MovieListItem({
     super.key,
     required this.movie,
     this.bottomBadge,
     this.topRank,
+    this.autofocus = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(8),
       onTap: () => context.pushNamed(
         'movie_details_plain',
         extra: movie,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            FastCachedImage(
+            PosterImage(
               url: movie.imageUrl,
               headers: movie.imageHeaders,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
-                color: const Color(0xFF1F1F1F),
-                child: const Icon(
-                  Icons.movie_creation_outlined,
-                  color: _kNetflixRed,
-                  size: 36,
-                ),
-              ),
+              title: movie.title,
             ),
             // Top-left PureVideo 'P' watermark
             Positioned(
               top: 6,
               left: 6,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(150),
+                  color: Colors.black.withAlpha(155),
                   borderRadius: BorderRadius.circular(3),
                 ),
                 child: const Text(
@@ -162,15 +163,42 @@ class _HomeScreenState extends State<HomeScreen> {
   late MoviesBloc _moviesBloc;
   final WatchedService _watchedService = getIt<WatchedService>();
   final SettingsService _settingsService = getIt<SettingsService>();
-
   _HomeFilter _selectedFilter = _HomeFilter.all;
   String? _selectedCategory;
   int _heroSeed = 0;
+
+  static const Set<String> _genericCategories = {
+    'polecane dla ciebie',
+    'popularne filmy',
+    'gorące filmy',
+    'najnowsze filmy',
+    'najpopularniejsze filmy',
+    'popularne',
+  };
 
   @override
   void initState() {
     super.initState();
     _moviesBloc = MoviesBloc();
+  }
+
+  String _movieDedupeKey(MovieModel m) {
+    final norm = MergeService.normalizeTitle(m.title);
+    final isSeries = _isSeriesMovie(m) ? 's' : 'm';
+    return '$norm|$isSeries';
+  }
+
+  List<MovieModel> _dedupeMovies(List<MovieModel> input) {
+    final seen = <String>{};
+    final out = <MovieModel>[];
+    for (final m in input) {
+      final key = _movieDedupeKey(m);
+      if (key.isEmpty || key.startsWith('|')) continue;
+      if (seen.add(key)) {
+        out.add(m);
+      }
+    }
+    return out;
   }
 
   bool _isSeriesMovie(MovieModel m) {
@@ -201,6 +229,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (lower.contains('familij')) {
       return 'Familijne';
     }
+    if (lower == 'najpopularniejsze seriale' || lower == 'seriale') {
+      return 'Popularne seriale';
+    }
+    if (lower == 'najpopularniejsze filmy' ||
+        lower == 'gorące filmy' ||
+        lower == 'najnowsze filmy') {
+      return 'Popularne filmy';
+    }
     return lower[0].toUpperCase() + lower.substring(1);
   }
 
@@ -221,14 +257,35 @@ class _HomeScreenState extends State<HomeScreen> {
     return cats.toList();
   }
 
+  String _pickPrimaryCategory(List<String> cats) {
+    // Prefer specific genres/curated categories over generic catch-alls
+    for (final c in const [
+      'Bajki dla dzieci',
+      'Familijne',
+      'Popularne seriale',
+      'Akcja',
+      'Komedia',
+      'Horror',
+      'Thriller',
+      'Sci-Fi',
+      'Dramat',
+    ]) {
+      if (cats.contains(c)) return c;
+    }
+    for (final c in cats) {
+      if (!_genericCategories.contains(c.toLowerCase())) return c;
+    }
+    return cats.first;
+  }
+
   List<MovieModel> _applyFilter(List<MovieModel> all) {
-    var list = all;
+    var list = _dedupeMovies(all);
     if (_selectedFilter == _HomeFilter.series) {
       list = list.where(_isSeriesMovie).toList();
     } else if (_selectedFilter == _HomeFilter.movies) {
       list = list.where((m) => !_isSeriesMovie(m)).toList();
     } else if (_selectedFilter == _HomeFilter.myList) {
-      return _settingsService.getMyList();
+      return _dedupeMovies(_settingsService.getMyList());
     }
     if (_selectedCategory != null) {
       list = list
@@ -238,24 +295,70 @@ class _HomeScreenState extends State<HomeScreen> {
     return list;
   }
 
-  Map<String, List<MovieModel>> _groupByCategories(List<MovieModel> movies) {
-    final rawMap = <String, List<MovieModel>>{};
-    for (final movie in movies) {
-      final cats = _extractMovieCategories(movie);
-      for (final cat in cats) {
-        if (_selectedCategory != null && cat != _selectedCategory) continue;
-        final bucket = rawMap.putIfAbsent(cat, () => []);
-        if (!bucket.any((m) => m.title == movie.title)) {
-          bucket.add(movie);
-        }
+  List<String> _collectAllCategories(List<MovieModel> movies) {
+    final set = <String>{};
+    for (final m in movies) {
+      set.addAll(_extractMovieCategories(m));
+    }
+    final ordered = <String>[];
+    for (final priority in const [
+      'Bajki dla dzieci',
+      'Familijne',
+      'Popularne seriale',
+      'Popularne filmy',
+      'Akcja',
+      'Komedia',
+      'Horror',
+      'Thriller',
+      'Sci-Fi',
+      'Dramat',
+    ]) {
+      if (set.remove(priority)) {
+        ordered.add(priority);
       }
     }
+    ordered.addAll(set);
+    return ordered;
+  }
+
+  Map<String, List<MovieModel>> _groupByCategories(
+    List<MovieModel> movies, {
+    Set<String> excludeKeys = const {},
+  }) {
+    final rawMap = <String, List<MovieModel>>{};
+    final usedKeys = <String>{...excludeKeys};
+
+    for (final movie in movies) {
+      final key = _movieDedupeKey(movie);
+      final cats = _extractMovieCategories(movie);
+
+      if (_selectedCategory != null) {
+        if (!cats.contains(_selectedCategory)) continue;
+        final bucket = rawMap.putIfAbsent(_selectedCategory!, () => []);
+        if (!bucket.any((m) => _movieDedupeKey(m) == key)) {
+          bucket.add(movie);
+        }
+      } else {
+        // Assign every movie to AT MOST ONE category row on the Home feed -> ZERO duplicates!
+        if (!usedKeys.add(key)) continue;
+        final primaryCat = _pickPrimaryCategory(cats);
+        final bucket = rawMap.putIfAbsent(primaryCat, () => []);
+        bucket.add(movie);
+      }
+    }
+
     final ordered = <String, List<MovieModel>>{};
     for (final priority in const [
       'Bajki dla dzieci',
       'Familijne',
+      'Popularne seriale',
+      'Akcja',
+      'Komedia',
+      'Horror',
+      'Thriller',
+      'Sci-Fi',
+      'Dramat',
       'Popularne filmy',
-      'Ostatnio dodane filmy',
     ]) {
       if (rawMap.containsKey(priority)) {
         ordered[priority] = rawMap.remove(priority)!;
@@ -276,82 +379,83 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) {
         return SafeArea(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+            constraints:
+                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
             child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Wybierz kategorię',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white),
-                      onPressed: () => Navigator.of(ctx).pop(),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, color: Colors.white12),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    ListTile(
-                      title: Text(
-                        'Wszystkie kategorie',
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Wybierz kategorię',
                         style: TextStyle(
-                          color: _selectedCategory == null
-                              ? _kNetflixRed
-                              : Colors.white,
-                          fontWeight: _selectedCategory == null
-                              ? FontWeight.bold
-                              : FontWeight.normal,
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      trailing: _selectedCategory == null
-                          ? const Icon(Icons.check, color: _kNetflixRed)
-                          : null,
-                      onTap: () {
-                        setState(() => _selectedCategory = null);
-                        Navigator.of(ctx).pop();
-                      },
-                    ),
-                    for (final c in categories)
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Colors.white12),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
                       ListTile(
                         title: Text(
-                          c,
+                          'Wszystkie kategorie',
                           style: TextStyle(
-                            color: _selectedCategory == c
+                            color: _selectedCategory == null
                                 ? _kNetflixRed
-                                : Colors.white70,
-                            fontWeight: _selectedCategory == c
+                                : Colors.white,
+                            fontWeight: _selectedCategory == null
                                 ? FontWeight.bold
                                 : FontWeight.normal,
                           ),
                         ),
-                        trailing: _selectedCategory == c
+                        trailing: _selectedCategory == null
                             ? const Icon(Icons.check, color: _kNetflixRed)
                             : null,
                         onTap: () {
-                          setState(() => _selectedCategory = c);
+                          setState(() => _selectedCategory = null);
                           Navigator.of(ctx).pop();
                         },
                       ),
-                  ],
+                      for (final c in categories)
+                        ListTile(
+                          title: Text(
+                            c,
+                            style: TextStyle(
+                              color: _selectedCategory == c
+                                  ? _kNetflixRed
+                                  : Colors.white70,
+                              fontWeight: _selectedCategory == c
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: _selectedCategory == c
+                              ? const Icon(Icons.check, color: _kNetflixRed)
+                              : null,
+                          onTap: () {
+                            setState(() => _selectedCategory = c);
+                            Navigator.of(ctx).pop();
+                          },
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           ),
         );
       },
@@ -360,6 +464,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isWide = DeviceUtils.isWideLayout(context);
+
     return BlocProvider(
       create: (_) => _moviesBloc..add(LoadMoviesRequested()),
       child: Scaffold(
@@ -371,6 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: CircularProgressIndicator(color: _kNetflixRed),
               );
             }
+
             if (state is MoviesError) {
               return ErrorView(
                 message: state.message,
@@ -379,8 +487,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               );
             }
+
             if (state is MoviesLoaded) {
-              if (state.movies.isEmpty) {
+              final allUnique = _dedupeMovies(state.movies);
+              if (allUnique.isEmpty) {
                 return const Center(
                   child: Text(
                     'Brak dostępnych filmów',
@@ -389,18 +499,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               }
 
-              final allCategories =
-                  _groupByCategories(state.movies).keys.toList();
-              final filteredMovies = _applyFilter(state.movies);
+              final allCategories = _collectAllCategories(allUnique);
+              final filteredMovies = _applyFilter(allUnique);
+              final pool =
+                  filteredMovies.isNotEmpty ? filteredMovies : allUnique;
+              final heroMovie = pool[_heroSeed % pool.length];
+
+              final showTop10 =
+                  _selectedCategory == null && pool.length >= 3;
+              final top10Movies = showTop10 ? pool.take(10).toList() : <MovieModel>[];
+              final excludeFromCategories = <String>{
+                if (_selectedCategory == null) ...top10Movies.map(_movieDedupeKey),
+              };
               final grouped = _groupByCategories(
-                  filteredMovies.isEmpty ? state.movies : filteredMovies);
-              final heroPool =
-                  filteredMovies.isNotEmpty ? filteredMovies : state.movies;
-              final heroMovie = heroPool[_heroSeed % heroPool.length];
+                pool,
+                excludeKeys: excludeFromCategories,
+              );
 
               return SettingsListenable(
                 builder: (context, box, _) {
                   if (!_settingsService.isNetflixStyle) {
+                    final gridCols =
+                        screenWidth > 960 ? 6 : (screenWidth > 620 ? 4 : 3);
                     return Scaffold(
                       appBar: AppBar(
                         title: const Text('PureVideo'),
@@ -416,23 +536,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           context.read<MoviesBloc>().add(LoadMoviesRequested());
                         },
                         child: GridView.builder(
-                          padding: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.all(10),
                           gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 0.68,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: gridCols,
+                            childAspectRatio: 0.67,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
                           ),
-                          itemCount: state.movies.length,
+                          itemCount: allUnique.length,
                           itemBuilder: (context, index) => MovieListItem(
-                            movie: state.movies[index],
+                            movie: allUnique[index],
+                            autofocus: DeviceUtils.isTv && index == 0,
                           ),
                         ),
                       ),
                     );
                   }
-                  final myList = _settingsService.getMyList();
+
+                  final myList = _dedupeMovies(_settingsService.getMyList());
                   return Stack(
                     children: [
                       RefreshIndicator(
@@ -448,10 +570,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: _buildTopHeaderAndPills(
                                 context,
                                 allCategories,
+                                isWide: isWide,
                               ),
                             ),
                             SliverToBoxAdapter(
-                              child: _buildHeroBanner(context, heroMovie),
+                              child: isWide
+                                  ? _buildTvHeroBanner(context, heroMovie)
+                                  : _buildHeroBanner(context, heroMovie),
                             ),
                             // Continue Watching row ("Ostatnio oglądane")
                             SliverToBoxAdapter(
@@ -468,17 +593,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                             // Top 10 / Popularne
-                            if (heroPool.length >= 3)
+                            if (showTop10)
                               SliverToBoxAdapter(
                                 child: _buildHorizontalRow(
                                   context,
                                   title: 'Top 10 dzisiaj w PureVideo',
-                                  movies: heroPool.take(10).toList(),
+                                  movies: top10Movies,
                                   showRank: true,
                                   badgeText: 'Nowy sezon',
                                 ),
                               ),
-                            // Category rows
+                            // Category rows (100% deduplicated!)
                             for (final entry in grouped.entries)
                               if (entry.value.isNotEmpty)
                                 SliverToBoxAdapter(
@@ -499,29 +624,35 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      // Floating "Odtwórz losowo" pill button like on the Netflix screenshot
-                      Positioned(
-                        right: 16,
-                        bottom: 16,
-                        child: Material(
-                          color: Colors.white,
-                          elevation: 6,
-                          borderRadius: BorderRadius.circular(28),
-                          child: InkWell(
+                      if (!isWide)
+                        Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: TvFocusable(
                             borderRadius: BorderRadius.circular(28),
                             onTap: () {
-                              final randomMovie = state.movies[
+                              final randomMovie = allUnique[
                                   DateTime.now().millisecondsSinceEpoch %
-                                      state.movies.length];
+                                      allUnique.length];
                               context.pushNamed(
                                 'movie_details_plain',
                                 extra: randomMovie,
                               );
                             },
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 10),
-                              child: Row(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(28),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black54,
+                                    blurRadius: 10,
+                                  ),
+                                ],
+                              ),
+                              child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.shuffle,
@@ -540,7 +671,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ),
-                      ),
                     ],
                   );
                 },
@@ -554,11 +684,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTopHeaderAndPills(
-      BuildContext context, List<String> allCategories) {
+      BuildContext context, List<String> allCategories,
+      {bool isWide = false}) {
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+        padding: EdgeInsets.fromLTRB(isWide ? 24 : 16, 8, isWide ? 24 : 16, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -586,15 +717,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white, size: 26),
+                  icon:
+                      const Icon(Icons.search, color: Colors.white, size: 26),
                   onPressed: () => context.go('/search'),
                 ),
-                GestureDetector(
+                const SizedBox(width: 4),
+                TvFocusable(
+                  borderRadius: BorderRadius.circular(6),
                   onTap: () => context.pushNamed('accounts'),
                   child: Container(
-                    width: 28,
-                    height: 28,
-                    margin: const EdgeInsets.only(left: 4),
+                    width: 30,
+                    height: 30,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [_kNetflixRed, Color(0xFF8B0000)],
@@ -621,12 +754,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       _selectedCategory != null)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: InkWell(
+                      child: TvFocusable(
+                        borderRadius: BorderRadius.circular(20),
                         onTap: () => setState(() {
                           _selectedFilter = _HomeFilter.all;
                           _selectedCategory = null;
                         }),
-                        borderRadius: BorderRadius.circular(20),
                         child: Container(
                           padding: const EdgeInsets.all(7),
                           decoration: BoxDecoration(
@@ -655,27 +788,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       _selectedFilter = _selectedFilter == _HomeFilter.movies
                           ? _HomeFilter.all
                           : _HomeFilter.movies;
-                    }),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildFilterChip(
-                    label: 'Bajki dla dzieci',
-                    selected: _selectedCategory == 'Bajki dla dzieci',
-                    onTap: () => setState(() {
-                      _selectedCategory =
-                          _selectedCategory == 'Bajki dla dzieci'
-                              ? null
-                              : 'Bajki dla dzieci';
-                    }),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildFilterChip(
-                    label: 'Familijne',
-                    selected: _selectedCategory == 'Familijne',
-                    onTap: () => setState(() {
-                      _selectedCategory = _selectedCategory == 'Familijne'
-                          ? null
-                          : 'Familijne';
                     }),
                   ),
                   const SizedBox(width: 8),
@@ -710,9 +822,10 @@ class _HomeScreenState extends State<HomeScreen> {
     bool hasDropdown = false,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
+    return TvFocusable(
       borderRadius: BorderRadius.circular(20),
+      focusScale: 1.02,
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
@@ -746,6 +859,212 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildTvHeroBanner(BuildContext context, MovieModel movie) {
+    final isSeries = _isSeriesMovie(movie);
+    final inMyList = _settingsService.isInMyList(movie);
+    final rawCat = movie.services.first.category;
+    final catTag = (rawCat != null && rawCat.trim().isNotEmpty)
+        ? _cleanCategoryName(rawCat)
+        : (isSeries ? 'Serial' : 'Film');
+    final serviceTag =
+        movie.services.map((s) => s.service.displayName).join(' • ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 6, 24, 14),
+      child: Container(
+        height: 290,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white24, width: 0.9),
+          color: const Color(0xFF111111),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Blurred ambient backdrop using the poster
+              ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+                child: Opacity(
+                  opacity: 0.38,
+                  child: PosterImage(
+                    url: movie.imageUrl,
+                    headers: movie.imageHeaders,
+                    title: movie.title,
+                  ),
+                ),
+              ),
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      Color(0xF0000000),
+                      Color(0xBB000000),
+                      Color(0x44000000),
+                    ],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(22),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            children: [
+                              const Text(
+                                'P',
+                                style: TextStyle(
+                                  color: _kNetflixRed,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                isSeries ? 'S E R I A L' : 'F I L M',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                  letterSpacing: 2.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            movie.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            '$catTag  •  Polecane  •  $serviceTag',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TvFocusable(
+                                autofocus: DeviceUtils.isTv,
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => context.pushNamed(
+                                  'movie_details_plain',
+                                  extra: movie,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 22, vertical: 11),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.play_arrow,
+                                          color: Colors.black, size: 24),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'Odtwórz',
+                                        style: TextStyle(
+                                          color: Colors.black,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              TvFocusable(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => _settingsService.toggleMyList(movie),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 18, vertical: 11),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2B2B2B),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        inMyList ? Icons.check : Icons.add,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Text(
+                                        'Moja lista',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    AspectRatio(
+                      aspectRatio: 2 / 3,
+                      child: TvFocusable(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => context.pushNamed(
+                          'movie_details_plain',
+                          extra: movie,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: PosterImage(
+                            url: movie.imageUrl,
+                            headers: movie.imageHeaders,
+                            title: movie.title,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeroBanner(BuildContext context, MovieModel movie) {
     final isSeries = _isSeriesMovie(movie);
     final inMyList = _settingsService.isInMyList(movie);
@@ -753,11 +1072,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final catTag = (rawCat != null && rawCat.trim().isNotEmpty)
         ? _cleanCategoryName(rawCat)
         : (isSeries ? 'Serial' : 'Film');
-    final serviceTag = movie.services.map((s) => s.service.displayName).join(' • ');
+    final serviceTag =
+        movie.services.map((s) => s.service.displayName).join(' • ');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-      child: GestureDetector(
+      child: TvFocusable(
+        borderRadius: BorderRadius.circular(16),
+        focusScale: 1.01,
         onTap: () => context.pushNamed(
           'movie_details_plain',
           extra: movie,
@@ -781,17 +1103,11 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                FastCachedImage(
+                PosterImage(
                   url: movie.imageUrl,
                   headers: movie.imageHeaders,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    color: const Color(0xFF1A1A1A),
-                    child: const Icon(Icons.movie,
-                        color: Colors.white24, size: 72),
-                  ),
+                  title: movie.title,
                 ),
-                // Top and bottom gradient vignette like Netflix mobile card
                 Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
@@ -942,6 +1258,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildContinueWatchingSection(BuildContext context) {
+    final isWide = DeviceUtils.isWideLayout(context);
     return StreamBuilder<List<WatchedMovieModel>>(
       stream: _watchedService.watchedStream,
       builder: (context, snapshot) {
@@ -956,10 +1273,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 18, 16, 10),
-              child: Text(
-                'Ostatnio oglądane',
+            Padding(
+              padding: EdgeInsets.fromLTRB(isWide ? 24 : 16, 18, 16, 10),
+              child: const Text(
+                'Kontynuuj oglądanie',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
@@ -968,21 +1285,21 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             SizedBox(
-              height: 195,
+              height: 196,
               child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 16),
                 scrollDirection: Axis.horizontal,
                 itemCount: watchedList.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   final item = watchedList[index];
-                  final movieModel = MovieModel(
+                  final movie = MovieModel(
                     services: item.movie.services
-                        .map((e) => ServiceMovieModel(
-                              service: e.service,
-                              url: e.url,
-                              title: e.title,
-                              imageUrl: e.imageUrl,
+                        .map((s) => ServiceMovieModel(
+                              service: s.service,
+                              url: s.url,
+                              title: s.title,
+                              imageUrl: s.imageUrl,
                             ))
                         .toList(),
                   );
@@ -993,21 +1310,22 @@ class _HomeScreenState extends State<HomeScreen> {
                       : item.watchedTime;
                   final int denom = item.movie.isSeries ? 2700 : 5700;
                   final double progress =
-                      (watchedSec / denom).clamp(0.08, 0.96);
+                      (watchedSec / denom).clamp(0.06, 0.96);
 
                   final String subtitle = lastEp != null
                       ? 'S${lastEp.season.number}:E${lastEp.watchedEpisode.episode.number}'
                       : '${(watchedSec ~/ 60) > 0 ? (watchedSec ~/ 60) : 1} min';
 
                   return SizedBox(
-                    width: 126,
-                    child: GestureDetector(
+                    width: 120,
+                    child: TvFocusable(
+                      borderRadius: BorderRadius.circular(8),
                       onTap: () => context.pushNamed(
                         'movie_details_plain',
-                        extra: movieModel,
+                        extra: movie,
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                         child: Container(
                           color: const Color(0xFF181818),
                           child: Column(
@@ -1017,50 +1335,35 @@ class _HomeScreenState extends State<HomeScreen> {
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    FastCachedImage(
-                                      url: item.movie.imageUrl,
-                                      headers: item.movie.imageHeaders,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        color: const Color(0xFF222222),
-                                        padding: const EdgeInsets.all(8),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          item.movie.title,
-                                          maxLines: 3,
-                                          textAlign: TextAlign.center,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
+                                    PosterImage(
+                                      url: movie.imageUrl,
+                                      headers: movie.imageHeaders,
+                                      title: movie.title,
                                     ),
                                     Container(color: Colors.black26),
-                                    Positioned(
-                                      top: 4,
-                                      right: 4,
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          _watchedService
-                                              .removeMovie(item.movie);
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.all(3),
-                                          decoration: const BoxDecoration(
-                                            color: Colors.black87,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: const Icon(
-                                            Icons.close,
-                                            color: Colors.white70,
-                                            size: 14,
+                                    if (!DeviceUtils.isTv)
+                                      Positioned(
+                                        top: 4,
+                                        right: 4,
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            _watchedService
+                                                .removeMovie(item.movie);
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.all(3),
+                                            decoration: const BoxDecoration(
+                                              color: Colors.black87,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(
+                                              Icons.close,
+                                              color: Colors.white70,
+                                              size: 14,
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
                                     Center(
                                       child: Container(
                                         width: 42,
@@ -1154,11 +1457,15 @@ class _HomeScreenState extends State<HomeScreen> {
     bool showRank = false,
     String? badgeText,
   }) {
+    final isWide = DeviceUtils.isWideLayout(context);
+    final double cardWidth = isWide ? 132 : 120;
+    final double rowHeight = isWide ? 198 : 180;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+          padding: EdgeInsets.fromLTRB(isWide ? 24 : 16, 20, 16, 10),
           child: Text(
             title,
             style: const TextStyle(
@@ -1169,9 +1476,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         SizedBox(
-          height: 170,
+          height: rowHeight,
           child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 16),
             scrollDirection: Axis.horizontal,
             itemCount: movies.length,
             separatorBuilder: (_, __) => const SizedBox(width: 10),
@@ -1182,7 +1489,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 badge = 'Ostatnio dodany';
               }
               return SizedBox(
-                width: 114,
+                width: cardWidth,
                 child: MovieListItem(
                   movie: movie,
                   topRank: showRank ? index + 1 : null,

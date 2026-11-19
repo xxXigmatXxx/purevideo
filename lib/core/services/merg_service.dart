@@ -1,11 +1,16 @@
-import 'package:flutter/material.dart';
-import 'package:purevideo/data/models/movie_model.dart';
 import 'package:diacritic/diacritic.dart';
+import 'package:html/parser.dart' as html_parser;
+import 'package:purevideo/data/models/movie_model.dart';
 
 class MergeService {
   final List<MovieModel> _movies = [];
   static final _nonWordRegex = RegExp(r'[^\w\s]');
   static final _spacesRegex = RegExp(r'\s+');
+  static final _yearSuffixRegex = RegExp(r'\s*\((?:19|20)\d{2}\)\s*$');
+  static final _tagSuffixRegex = RegExp(
+    r'\s*-\s*(?:HD|CAM|4K|FHD|AI|PL|Dubbing|Lektor|Napisy)(?:\s+.*)?$',
+    caseSensitive: false,
+  );
 
   void clear() {
     _movies.clear();
@@ -34,11 +39,12 @@ class MergeService {
 
   void _mergeIntoList(List<ServiceMovieModel> movies, List<MovieModel> target) {
     for (final movie in movies) {
-      final normalizedTitle = _normalizeTitle(movie.title);
+      final normalizedTitle = normalizeTitle(movie.title);
+      if (normalizedTitle.isEmpty) continue;
       final isMovieSeries = _isSeriesEntry(movie);
       final existingMovieIndex = target.indexWhere(
         (existingMovie) =>
-            _normalizeTitle(existingMovie.services.first.title) ==
+            normalizeTitle(existingMovie.services.first.title) ==
                 normalizedTitle &&
             existingMovie.services.any(_isSeriesEntry) == isMovieSeries,
       );
@@ -48,7 +54,6 @@ class MergeService {
         final existingSvcIdx = existingMovie.services.indexWhere(
           (service) => service.service == movie.service,
         );
-
         if (existingSvcIdx == -1) {
           final updatedServices = [...existingMovie.services, movie];
           target[existingMovieIndex] = MovieModel(services: updatedServices);
@@ -56,14 +61,18 @@ class MergeService {
           final oldSvc = existingMovie.services[existingSvcIdx];
           final mergedCat =
               _mergeCategoryStrings(oldSvc.category, movie.category);
+          final betterImg =
+              (oldSvc.imageUrl.trim().isEmpty && movie.imageUrl.trim().isNotEmpty)
+                  ? movie.imageUrl
+                  : oldSvc.imageUrl;
           final updatedServices =
               List<ServiceMovieModel>.from(existingMovie.services);
-          if (mergedCat != oldSvc.category) {
+          if (mergedCat != oldSvc.category || betterImg != oldSvc.imageUrl) {
             updatedServices[existingSvcIdx] = ServiceMovieModel(
               service: oldSvc.service,
               url: oldSvc.url,
               title: oldSvc.title,
-              imageUrl: oldSvc.imageUrl,
+              imageUrl: betterImg,
               category: mergedCat,
             );
           }
@@ -106,10 +115,21 @@ class MergeService {
         c.contains('serial');
   }
 
-  String _normalizeTitle(String title) {
-    return removeDiacritics(title
+  static String normalizeTitle(String title) {
+    var t = title;
+    if (t.contains('&')) {
+      try {
+        t = html_parser.parseFragment(t).text ?? t;
+      } catch (_) {}
+    }
+    t = t.replaceAll('\u00a0', ' ').trim();
+    if (t.contains(' / ')) {
+      final first = t.split(' / ').first.trim();
+      if (first.isNotEmpty) t = first;
+    }
+    t = t.replaceAll(_tagSuffixRegex, '').replaceAll(_yearSuffixRegex, '').trim();
+    return removeDiacritics(t
         .toLowerCase()
-        .trim()
         .replaceAll(_nonWordRegex, '')
         .replaceAll(_spacesRegex, ' ')
         .replaceAll(' ', '')

@@ -69,7 +69,13 @@ class EkinoMovieRepository implements MovieRepository {
   }
 
   String _cleanTitle(String rawTitle) {
-    var t = rawTitle.replaceAll('\u00a0', ' ').trim();
+    var t = rawTitle;
+    if (t.contains('&')) {
+      try {
+        t = html.parseFragment(t).text ?? t;
+      } catch (_) {}
+    }
+    t = t.replaceAll('\u00a0', ' ').trim();
     if (t.contains(' / ')) {
       t = t.split(' / ').first.trim();
     }

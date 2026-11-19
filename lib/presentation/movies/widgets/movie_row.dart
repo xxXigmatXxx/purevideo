@@ -1,13 +1,18 @@
-import 'package:fast_cached_network_image/fast_cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:purevideo/data/models/movie_model.dart';
+import 'package:go_router/go_router.dart';
+import 'package:purevideo/presentation/global/widgets/poster_image.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 
 class MovieRow extends StatelessWidget {
   final String title;
   final List<MovieModel> movies;
 
-  const MovieRow({super.key, required this.title, required this.movies});
+  const MovieRow({
+    super.key,
+    required this.title,
+    required this.movies,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -15,47 +20,41 @@ class MovieRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: Text(
             title,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
         SizedBox(
-          height: 220,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+          height: 210,
+          child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             itemCount: movies.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 16),
             itemBuilder: (context, index) {
               final movie = movies[index];
-              return AspectRatio(
-                aspectRatio: 11 / 16,
-                child: GestureDetector(
-                  onTap: () => context.pushNamed(
-                    'movie_details',
-                    pathParameters: {
-                      'title': movie.title,
-                    },
-                    extra: movie,
-                  ),
-                  child: ClipRRect(
+              return Padding(
+                padding: const EdgeInsets.all(4.0),
+                child: SizedBox(
+                  width: 132,
+                  child: TvFocusable(
                     borderRadius: BorderRadius.circular(8),
-                    child: FastCachedImage(
-                      url: movie.imageUrl,
-                      headers: movie.imageHeaders,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: Colors.grey[300],
-                        child: const Icon(
-                          Icons.broken_image,
-                          size: 50,
-                          color: Colors.grey,
-                        ),
+                    onTap: () {
+                      context.pushNamed(
+                        'movie_details_plain',
+                        extra: movie,
+                      );
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: PosterImage(
+                        url: movie.imageUrl,
+                        headers: movie.imageHeaders,
+                        title: movie.title,
                       ),
                     ),
                   ),
