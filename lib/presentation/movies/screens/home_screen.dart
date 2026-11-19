@@ -8,6 +8,7 @@ import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
+import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/models/watched_model.dart';
 import 'package:purevideo/di/injection_container.dart';
