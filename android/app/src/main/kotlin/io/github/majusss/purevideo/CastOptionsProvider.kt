@@ -1,6 +1,7 @@
 package io.github.majusss.purevideo
 
 import android.content.Context
+import com.google.android.gms.cast.CastMediaControlIntent
 import com.google.android.gms.cast.framework.CastOptions
 import com.google.android.gms.cast.framework.OptionsProvider
 import com.google.android.gms.cast.framework.SessionProvider
@@ -8,9 +9,8 @@ import com.google.android.gms.cast.framework.SessionProvider
 class CastOptionsProvider : OptionsProvider {
     override fun getCastOptions(context: Context): CastOptions {
         return CastOptions.Builder()
-                // .setReceiverApplicationId("3FC55E64")
-                .setReceiverApplicationId("1E357349")
-                .build()
+            .setReceiverApplicationId(CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID)
+            .build()
     }
 
     override fun getAdditionalSessionProviders(context: Context): List<SessionProvider>? {

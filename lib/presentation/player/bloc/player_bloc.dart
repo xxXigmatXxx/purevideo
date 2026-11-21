@@ -1,12 +1,16 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_cast_framework/cast.dart' hide PlayerState;
 import 'package:media_kit/media_kit.dart' hide PlayerState;
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:pip/pip.dart';
+import 'package:purevideo/core/services/cast_proxy_service.dart';
 import 'package:purevideo/core/services/media_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
@@ -16,11 +20,12 @@ import 'package:purevideo/data/repositories/video_source_repository.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/player/bloc/player_event.dart';
 import 'package:purevideo/presentation/player/bloc/player_state.dart';
-import 'package:flutter_cast_framework/cast.dart' hide PlayerState;
-import 'package:pip/pip.dart';
 
 class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
+  static const MethodChannel _castChannel = MethodChannel('purevideo/cast');
+
   final WatchedService watchedService = getIt();
+  final CastProxyService _castProxyService = getIt<CastProxyService>();
 
   late final Player _player;
   late final VideoController _controller;
@@ -28,6 +33,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   late StreamSubscription<Duration?> _durationSubscription;
   late StreamSubscription<bool> _playingSubscription;
   late StreamSubscription<bool> _bufferingSubscription;
+  StreamSubscription<MediaStatus>? _castStatusSubscription;
 
   Timer? _hideControlsTimer;
   Timer? _seekingTimer;
@@ -50,6 +56,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   int _lastSavedSecond = -1;
   int _lastEmittedSecond = -1;
   Duration _latestPosition = Duration.zero;
+  bool _localMediaOpened = false;
 
   PlayerBloc()
       : super(PlayerState(
@@ -74,9 +81,13 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     on<DisposePlayer>(_onDisposePlayer);
     on<ToggleImmersiveMode>(_onToggleImmersiveMode);
     on<CastVideo>(_onCastVideo);
+    on<UpdateCastState>(_onUpdateCastState);
   }
 
   bool _mediaItemAdded = false;
+
+  bool get _isCastConnected =>
+      state.castFramework.castContext.state.value == CastState.connected;
 
   void _saveWatchedProgress([int? overrideSeconds, bool notify = false]) {
     if (_movie == null) return;
@@ -113,9 +124,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         playing: false,
       ));
     } catch (_) {}
-    try {
-      state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
-    } catch (_) {}
     _saveWatchedProgress(null, true);
     try {
       state.pipFramework.dispose();
@@ -125,6 +133,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
     _bufferingDebounceTimer?.cancel();
+    _castStatusSubscription?.cancel();
     if (_castStateListener != null) {
       try {
         state.castFramework.castContext.state
@@ -133,6 +142,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         debugPrint('Error removing cast state listener: $e');
       }
     }
+    try {
+      state.castFramework.castContext.sessionManager.remoteMediaClient
+          .onProgressUpdated = null;
+    } catch (_) {}
     return super.close();
   }
 
@@ -169,6 +182,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     } catch (_) {}
 
     _positionSubscription = _player.stream.position.listen((position) {
+      if (_isCastConnected || state.isCasting) return;
       _latestPosition = position;
       final sec = position.inSeconds;
       if (sec != _lastEmittedSecond) {
@@ -178,6 +192,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     });
 
     _durationSubscription = _player.stream.duration.listen((duration) {
+      if (_isCastConnected || state.isCasting) return;
       if (duration.inSeconds > 0 &&
           duration.inSeconds != state.duration.inSeconds) {
         add(UpdateDuration(duration: duration));
@@ -185,16 +200,18 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     });
 
     _playingSubscription = _player.stream.playing.listen((playing) {
+      if (_isCastConnected || state.isCasting) return;
       if (playing != state.isPlaying) {
         add(UpdatePlayingState(isPlaying: playing));
       }
     });
 
     _bufferingSubscription = _player.stream.buffering.listen((buffering) {
+      if (_isCastConnected || state.isCasting) return;
       _bufferingDebounceTimer?.cancel();
       if (buffering) {
         _bufferingDebounceTimer = Timer(const Duration(milliseconds: 900), () {
-          if (!isClosed && !state.isBuffering) {
+          if (!isClosed && !state.isBuffering && !state.isCasting) {
             add(const UpdateBufferingState(isBuffering: true));
           }
         });
@@ -224,6 +241,117 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     } catch (_) {}
   }
 
+  void _attachCastListeners() {
+    try {
+      final sessionManager = state.castFramework.castContext.sessionManager;
+      final rmc = sessionManager.remoteMediaClient;
+
+      rmc.onProgressUpdated = (final progressMs, final durationMs) {
+        if (isClosed) return;
+        if (durationMs > 0) {
+          final dur = Duration(milliseconds: durationMs);
+          if ((dur.inSeconds - state.duration.inSeconds).abs() >= 1) {
+            add(UpdateDuration(duration: dur));
+          }
+        }
+        if (progressMs >= 0) {
+          final pos = Duration(milliseconds: progressMs);
+          _latestPosition = pos;
+          if (pos.inSeconds != _lastEmittedSecond) {
+            _lastEmittedSecond = pos.inSeconds;
+            add(UpdatePosition(position: pos));
+          }
+        }
+      };
+
+      _castStatusSubscription ??= rmc.mediaStatusStream.listen((status) {
+        if (isClosed) return;
+        final streamDur = status.mediaInfo?.streamDuration;
+        if (streamDur != null && streamDur > 0) {
+          final dur = Duration(milliseconds: streamDur);
+          if (dur.inSeconds != state.duration.inSeconds) {
+            add(UpdateDuration(duration: dur));
+          }
+        }
+        final ps = status.playerState;
+        if (ps != null) {
+          final idx = ps.index;
+          // 2 = playing, 3 = paused, 4 = buffering, 5 = loading
+          if (idx == 2 && !state.isPlaying) {
+            add(const UpdatePlayingState(isPlaying: true));
+            add(const UpdateBufferingState(isBuffering: false));
+          } else if (idx == 3 && state.isPlaying) {
+            add(const UpdatePlayingState(isPlaying: false));
+            add(const UpdateBufferingState(isBuffering: false));
+          } else if ((idx == 4 || idx == 5) && !state.isBuffering) {
+            add(const UpdateBufferingState(isBuffering: true));
+          }
+        }
+      });
+
+      if (_castStateListener == null) {
+        _castStateListener = () async {
+          if (isClosed) return;
+          final castState = state.castFramework.castContext.state.value;
+          if (castState == CastState.connected) {
+            String? deviceName;
+            try {
+              deviceName = await _castChannel.invokeMethod<String>('getDeviceName');
+            } catch (_) {}
+            if (!isClosed) {
+              add(UpdateCastState(isCasting: true, deviceName: deviceName));
+              if (state.selectedSource != null) {
+                add(const CastVideo());
+              }
+            }
+          } else if (castState == CastState.unconnected ||
+              castState == CastState.unavailable) {
+            if (!isClosed && state.isCasting) {
+              add(const UpdateCastState(isCasting: false));
+            }
+          }
+        };
+        state.castFramework.castContext.state.addListener(_castStateListener!);
+      }
+    } catch (e) {
+      debugPrint('Error initializing google cast listeners: $e');
+    }
+  }
+
+  Future<void> _onUpdateCastState(
+    UpdateCastState event,
+    Emitter<PlayerState> emit,
+  ) async {
+    emit(state.copyWith(
+      isCasting: event.isCasting,
+      castDeviceName: event.deviceName,
+      clearCastDeviceName: !event.isCasting,
+    ));
+
+    if (!event.isCasting &&
+        !_localMediaOpened &&
+        state.selectedSource != null &&
+        !state.selectedSource!.host.contains('(Web)')) {
+      try {
+        _localMediaOpened = true;
+        await _player.open(
+          Media(
+            state.selectedSource!.url,
+            httpHeaders: state.selectedSource!.headers ?? {},
+            start: _latestPosition,
+          ),
+          play: true,
+        );
+        emit(state.copyWith(
+          isBuffering: false,
+          isPlaying: true,
+        ));
+      } catch (e) {
+        debugPrint('Error resuming local player after cast disconnect: $e');
+      }
+    }
+  }
+
   Future<void> _onInitializePlayer(
     InitializePlayer event,
     Emitter<PlayerState> emit,
@@ -234,6 +362,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _initialSourceIndex = event.initialSourceIndex;
 
     await _initMediaKit();
+    _attachCastListeners();
 
     const options = PipOptions(
       autoEnterEnabled: true,
@@ -408,40 +537,12 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     Emitter<PlayerState> emit,
   ) async {
     emit(state.copyWith(
+      selectedSource: event.source,
       displayState: 'Przygotowywanie odtwarzacza...',
       isBuffering: true,
     ));
 
-    if (state.castFramework.castContext.state.value == CastState.connected) {
-      add(const CastVideo());
-      final sessionManager = state.castFramework.castContext.sessionManager;
-      sessionManager.remoteMediaClient.onProgressUpdated =
-          (final progressMs, final durationMs) {
-        final pos = Duration(milliseconds: progressMs);
-        _latestPosition = pos;
-        if (pos.inSeconds != _lastEmittedSecond) {
-          _lastEmittedSecond = pos.inSeconds;
-          add(UpdatePosition(position: pos));
-        }
-      };
-    }
-
-    try {
-      if (_castStateListener == null) {
-        _castStateListener = () async {
-          switch (state.castFramework.castContext.state.value) {
-            case CastState.connected:
-              add(const CastVideo());
-              break;
-            default:
-              break;
-          }
-        };
-        state.castFramework.castContext.state.addListener(_castStateListener!);
-      }
-    } catch (e) {
-      debugPrint('Error initializing google cast: $e');
-    }
+    _attachCastListeners();
 
     try {
       if (_audioSession == null) {
@@ -466,6 +567,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         watchedPosition = watchedMovie?.watchedTime;
       }
 
+      if (watchedPosition != null && watchedPosition > 0) {
+        _latestPosition = Duration(seconds: watchedPosition);
+      }
       _saveWatchedProgress(watchedPosition ?? 0);
 
       debugPrint('[PlayerBloc] Opening media: ${event.source.url}');
@@ -477,6 +581,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       });
 
       if (event.source.host.contains('(Web)')) {
+        _localMediaOpened = false;
         await _player.stop();
         emit(state.copyWith(
           isBuffering: false,
@@ -487,6 +592,26 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         return;
       }
 
+      if (_isCastConnected) {
+        _localMediaOpened = false;
+        try {
+          await _player.pause();
+        } catch (_) {}
+        String? deviceName;
+        try {
+          deviceName = await _castChannel.invokeMethod<String>('getDeviceName');
+        } catch (_) {}
+        emit(state.copyWith(
+          isCasting: true,
+          castDeviceName: deviceName,
+          selectedSource: event.source,
+          displayState: 'Przesyłanie na TV...',
+        ));
+        add(const CastVideo());
+        return;
+      }
+
+      _localMediaOpened = true;
       await _player.open(
         Media(
           event.source.url,
@@ -499,6 +624,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       emit(state.copyWith(
         isBuffering: false,
         isPlaying: true,
+        isCasting: false,
         selectedSource: event.source,
         displayState: '',
       ));
@@ -514,6 +640,26 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     PlayPause event,
     Emitter<PlayerState> emit,
   ) async {
+    if (state.isCasting || _isCastConnected) {
+      final rmc = state.castFramework.castContext.sessionManager.remoteMediaClient;
+      final nextPlaying = !state.isPlaying;
+      try {
+        if (nextPlaying) {
+          rmc.play();
+        } else {
+          rmc.pause();
+        }
+      } catch (e) {
+        debugPrint('Cast play/pause error: $e');
+      }
+      emit(state.copyWith(isPlaying: nextPlaying));
+      _saveWatchedProgress();
+      if (state.isOverlayVisible) {
+        _resetHideControlsTimer();
+      }
+      return;
+    }
+
     _audioSession?.setActive(!state.isPlaying);
     _player.playOrPause();
     _saveWatchedProgress();
@@ -531,6 +677,20 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     );
     _latestPosition = position;
     _lastEmittedSecond = position.inSeconds;
+
+    if (state.isCasting || _isCastConnected) {
+      try {
+        await _castChannel.invokeMethod('seek', {
+          'positionMs': position.inMilliseconds,
+        });
+      } catch (e) {
+        debugPrint('Cast seek error: $e');
+      }
+      emit(state.copyWith(position: position));
+      _saveWatchedProgress(position.inSeconds);
+      return;
+    }
+
     _player.seek(position);
     emit(state.copyWith(position: position));
     _saveWatchedProgress(position.inSeconds);
@@ -548,8 +708,9 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     if (direction == SeekDirection.backward) {
       newPositionSeconds = max(0, newPositionSeconds - 10);
     } else {
+      final maxDur = state.duration.inSeconds;
       newPositionSeconds =
-          min(newPositionSeconds + 10, state.duration.inSeconds);
+          maxDur > 0 ? min(newPositionSeconds + 10, maxDur) : newPositionSeconds + 10;
     }
 
     final newPos = Duration(seconds: newPositionSeconds);
@@ -567,6 +728,18 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _seekingTimer = Timer(const Duration(milliseconds: 400), () {
       add(const HideSeekingIndicator());
     });
+
+    if (state.isCasting || _isCastConnected) {
+      try {
+        await _castChannel.invokeMethod('seek', {
+          'positionMs': newPos.inMilliseconds,
+        });
+      } catch (e) {
+        debugPrint('Cast seek error: $e');
+      }
+      _saveWatchedProgress(newPositionSeconds);
+      return;
+    }
 
     _player.seek(newPos);
     _saveWatchedProgress(newPositionSeconds);
@@ -636,7 +809,6 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       _lastSavedSecond = curSec;
       _saveWatchedProgress(curSec);
     }
-    // Only rebuild UI when overlay controls are actually visible!
     if (state.isOverlayVisible) {
       emit(state.copyWith(position: event.position));
     }
@@ -651,12 +823,13 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       return;
     }
 
-    if (!_mediaItemAdded) {
+    if (!_mediaItemAdded && _movie != null) {
       _mediaItemAdded = true;
+      final poster = MovieModel.normalizePosterUrl(_movie!.imageUrl);
       _mediaService.audioHandler.add(MediaItem(
         id: _movie!.title,
         title: _movie!.title,
-        artUri: Uri.parse(_movie!.imageUrl),
+        artUri: poster.startsWith('http') ? Uri.tryParse(poster) : null,
         duration: state.duration,
       ));
       _updateNotification();
@@ -703,25 +876,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     try {
       _audioSession?.setActive(false);
     } catch (_) {}
-
     try {
       _mediaService.audioHandler.playbackState.add(PlaybackState(
         playing: false,
       ));
     } catch (_) {}
-
-    try {
-      state.castFramework.castContext.sessionManager.remoteMediaClient.stop();
-    } catch (_) {}
-
     _saveWatchedProgress(null, true);
-
     try {
       state.pipFramework.dispose();
     } catch (_) {}
-
     _disposeMediaKit();
-
     _hideControlsTimer?.cancel();
     _seekingTimer?.cancel();
     _debounceHideControlsTimer?.cancel();
@@ -758,43 +922,94 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   }
 
   Future<void> _onCastVideo(CastVideo event, Emitter<PlayerState> emit) async {
-    if (state.castFramework.castContext.state.value == CastState.connected) {
-      if (state.selectedSource == null) {
-        emit(state.copyWith(
-          errorMessage: 'Nie wybrano źródła wideo do przesłania.',
-        ));
-        return;
-      }
+    if (!_isCastConnected) return;
 
-      _player.pause();
+    final source = state.selectedSource;
+    if (source == null) {
+      emit(state.copyWith(
+        errorMessage: 'Nie wybrano źródła wideo do przesłania.',
+      ));
+      return;
+    }
+
+    if (source.host.contains('(Web)')) {
+      emit(state.copyWith(
+        errorMessage:
+            'To źródło otwarto w trybie Web. Wybierz natywne źródło z listy (np. Voe, Streamtape, Vidoza), aby przesłać na TV.',
+      ));
+      return;
+    }
+
+    try {
+      await _player.pause();
+    } catch (_) {}
+
+    final castUrl = await _castProxyService.registerStream(
+      url: source.url,
+      headers: source.headers,
+    );
+
+    String? deviceName = state.castDeviceName;
+    if (deviceName == null || deviceName.isEmpty) {
+      try {
+        deviceName = await _castChannel.invokeMethod<String>('getDeviceName');
+      } catch (_) {}
+    }
+
+    final posterUrl = MovieModel.normalizePosterUrl(_movie?.imageUrl ?? '');
+    final webImages = posterUrl.startsWith('http')
+        ? <WebImage>[WebImage(url: posterUrl)]
+        : <WebImage>[];
+
+    final isHls = source.url.toLowerCase().contains('.m3u8');
+    final durationMs =
+        state.duration.inMilliseconds > 0 ? state.duration.inMilliseconds : -1;
+
+    try {
       state.castFramework.castContext.sessionManager.remoteMediaClient.load(
-          MediaLoadRequestData(
-              currentTime: _latestPosition.inMilliseconds,
-              shouldAutoplay: true,
-              mediaInfo: MediaInfo(
-                  streamDuration: state.duration.inMilliseconds,
-                  streamType: StreamType.buffered,
-                  contentType: state.selectedSource!.url.contains('.m3u8')
-                      ? 'application/x-mpegurl'
-                      : 'video/mp4',
-                  contentId: state.selectedSource!.url,
-                  customDataAsJson:
-                      jsonEncode({'headers': state.selectedSource!.headers}),
-                  mediaMetadata: MediaMetadata(
-                      mediaType: MediaType.movie,
-                      strings: _movie!.isSeries
-                          ? {
-                              MediaMetadataKey.title.name: _movie!
-                                  .seasons![_seasonIndex!]
-                                  .episodes[_episodeIndex!]
-                                  .title,
-                              MediaMetadataKey.subtitle.name: _movie!.title,
-                            }
-                          : {MediaMetadataKey.title.name: _movie!.title},
-                      webImages: [
-                        WebImage(url: _movie!.imageUrl),
-                        WebImage(url: _movie!.imageUrl)
-                      ]))));
+        MediaLoadRequestData(
+          currentTime: _latestPosition.inMilliseconds,
+          shouldAutoplay: true,
+          mediaInfo: MediaInfo(
+            streamDuration: durationMs,
+            streamType: StreamType.buffered,
+            contentType: isHls ? 'application/x-mpegurl' : 'video/mp4',
+            contentId: castUrl,
+            customDataAsJson: '{}',
+            mediaMetadata: MediaMetadata(
+              mediaType: _movie?.isSeries == true
+                  ? MediaType.tvShow
+                  : MediaType.movie,
+              strings: (_movie != null &&
+                      _movie!.isSeries &&
+                      _seasonIndex != null &&
+                      _episodeIndex != null)
+                  ? {
+                      MediaMetadataKey.title.name: _movie!
+                          .seasons![_seasonIndex!]
+                          .episodes[_episodeIndex!]
+                          .title,
+                      MediaMetadataKey.subtitle.name: _movie!.title,
+                    }
+                  : {MediaMetadataKey.title.name: _movie?.title ?? 'PureVideo'},
+              webImages: webImages,
+            ),
+          ),
+        ),
+      );
+
+      emit(state.copyWith(
+        isCasting: true,
+        castDeviceName: deviceName,
+        isBuffering: false,
+        isPlaying: true,
+        displayState: '',
+      ));
+    } catch (e) {
+      debugPrint('Error loading media on Cast: $e');
+      emit(state.copyWith(
+        errorMessage: 'Nie udało się wysłać wideo na TV: $e',
+      ));
     }
   }
 

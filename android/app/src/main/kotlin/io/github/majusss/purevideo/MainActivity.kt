@@ -5,6 +5,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import com.google.android.gms.cast.MediaSeekOptions
+import com.google.android.gms.cast.framework.CastContext
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -12,6 +14,8 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : AudioServiceActivity() {
     private val CHANNEL = "purevideo/app_icon"
     private val DEVICE_CHANNEL = "purevideo/device"
+    private val CAST_CHANNEL = "purevideo/cast"
+
     private val aliases = mapOf(
         "default" to "io.github.majusss.purevideo.IconDefaultAlias",
         "netflix" to "io.github.majusss.purevideo.IconNetflixAlias"
@@ -19,6 +23,7 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setIcon" -> {
@@ -33,10 +38,47 @@ class MainActivity : AudioServiceActivity() {
                 else -> result.notImplemented()
             }
         }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEVICE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isTv" -> result.success(isTelevision())
                 else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CAST_CHANNEL).setMethodCallHandler { call, result ->
+            try {
+                val castContext = CastContext.getSharedInstance(applicationContext)
+                val session = castContext.sessionManager.currentCastSession
+                val remoteClient = session?.remoteMediaClient
+                when (call.method) {
+                    "seek" -> {
+                        val posMs = (call.argument<Number>("positionMs"))?.toLong() ?: 0L
+                        if (remoteClient != null) {
+                            remoteClient.seek(
+                                MediaSeekOptions.Builder()
+                                    .setPosition(posMs)
+                                    .build()
+                            )
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+                    "getDeviceName" -> {
+                        result.success(session?.castDevice?.friendlyName)
+                    }
+                    "isConnected" -> {
+                        result.success(session?.isConnected == true)
+                    }
+                    "stop" -> {
+                        remoteClient?.stop()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                result.error("CAST_ERROR", e.message, null)
             }
         }
     }

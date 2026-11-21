@@ -12,6 +12,8 @@ class PlayerState extends Equatable {
   final bool isOverlayVisible;
   final bool isSeeking;
   final bool isImersive;
+  final bool isCasting;
+  final String? castDeviceName;
   final SeekDirection? seekDirection;
   final Duration position;
   final Duration duration;
@@ -30,6 +32,8 @@ class PlayerState extends Equatable {
     this.isOverlayVisible = true,
     this.isSeeking = false,
     this.isImersive = false,
+    this.isCasting = false,
+    this.castDeviceName,
     this.seekDirection,
     this.position = Duration.zero,
     this.duration = Duration.zero,
@@ -48,6 +52,9 @@ class PlayerState extends Equatable {
     bool? isOverlayVisible,
     bool? isSeeking,
     bool? isImersive,
+    bool? isCasting,
+    String? castDeviceName,
+    bool clearCastDeviceName = false,
     SeekDirection? seekDirection,
     Duration? position,
     Duration? duration,
@@ -58,6 +65,7 @@ class PlayerState extends Equatable {
     FlutterCastFramework? castFramework,
     Pip? pipFramework,
   }) {
+    final nextCasting = isCasting ?? this.isCasting;
     return PlayerState(
       isLoading: isLoading ?? this.isLoading,
       isPlaying: isPlaying ?? this.isPlaying,
@@ -65,6 +73,10 @@ class PlayerState extends Equatable {
       isOverlayVisible: isOverlayVisible ?? this.isOverlayVisible,
       isSeeking: isSeeking ?? this.isSeeking,
       isImersive: isImersive ?? this.isImersive,
+      isCasting: nextCasting,
+      castDeviceName: clearCastDeviceName || !nextCasting
+          ? null
+          : (castDeviceName ?? this.castDeviceName),
       seekDirection: seekDirection ?? this.seekDirection,
       position: position ?? this.position,
       duration: duration ?? this.duration,
@@ -85,6 +97,8 @@ class PlayerState extends Equatable {
         isOverlayVisible,
         isSeeking,
         isImersive,
+        isCasting,
+        castDeviceName,
         seekDirection,
         position,
         duration,

@@ -367,6 +367,8 @@ class _PlayerViewState extends State<PlayerView> {
           prev.isLoading != curr.isLoading ||
           prev.errorMessage != curr.errorMessage ||
           prev.isImersive != curr.isImersive ||
+          prev.isCasting != curr.isCasting ||
+          prev.castDeviceName != curr.castDeviceName ||
           prev.selectedSource != curr.selectedSource,
       builder: (context, state) {
         if (state.isLoading) {
@@ -544,6 +546,12 @@ class _PlayerViewState extends State<PlayerView> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      CastButton(
+                        castFramework: state.castFramework,
+                        activeColor: _kNetflixRed,
+                        color: Colors.white,
+                        disabledColor: Colors.white54,
+                      ),
                       if (state.videoSources != null &&
                           state.videoSources!.length > 1)
                         TextButton.icon(
@@ -678,14 +686,61 @@ class _PlayerViewState extends State<PlayerView> {
             backgroundColor: Colors.black,
           body: Stack(
             children: [
-              RepaintBoundary(
-                child: Video(
-                  controller: bloc.controller,
-                  controls: NoVideoControls,
-                  fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
-                  wakelock: true,
+              if (state.isCasting)
+                Container(
+                  color: Colors.black,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: _kNetflixRed.withAlpha(32),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _kNetflixRed, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.cast_connected_rounded,
+                          color: _kNetflixRed,
+                          size: 48,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        (state.castDeviceName != null &&
+                                state.castDeviceName!.isNotEmpty)
+                            ? 'Odtwarzanie na TV: ${state.castDeviceName}'
+                            : 'Odtwarzanie na telewizorze (Cast)',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Źródło: ${state.selectedSource?.host ?? "Wideo"} • ${state.selectedSource?.quality ?? "HD"}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                RepaintBoundary(
+                  child: Video(
+                    controller: bloc.controller,
+                    controls: NoVideoControls,
+                    fit: state.isImersive ? BoxFit.cover : BoxFit.contain,
+                    wakelock: true,
+                  ),
                 ),
-              ),
               RepaintBoundary(
                 child: SafeArea(
                   child: BlocBuilder<PlayerBloc, PlayerState>(

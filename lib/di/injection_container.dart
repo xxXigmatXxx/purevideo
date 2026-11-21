@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_cast_framework/cast.dart';
 import 'package:get_it/get_it.dart';
 import 'package:purevideo/core/services/media_service.dart';
+import 'package:purevideo/core/services/cast_proxy_service.dart';
 import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
@@ -36,7 +37,7 @@ void setupInjection() {
   getIt.registerSingleton<Dio>(dio);
 
   getIt.registerSingleton<FlutterCastFramework>(
-    FlutterCastFramework.create(['urn:x-cast:majusss-purevideo']),
+    FlutterCastFramework.create(const <String>[]),
   );
 
   getIt.registerFactory<CaptchaService>(() => CaptchaService());
@@ -44,6 +45,7 @@ void setupInjection() {
 
   getIt.registerSingleton<ResolveUrlService>(ResolveUrlService(dio));
   getIt.registerSingleton<VideoSourceRepository>(VideoSourceRepository());
+  getIt.registerSingleton<CastProxyService>(CastProxyService());
   getIt.registerSingleton<MergeService>(MergeService());
   getIt.registerSingleton<MediaService>(MediaService());
   getIt.registerSingleton<SettingsService>(SettingsService());

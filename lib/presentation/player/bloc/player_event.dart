@@ -146,3 +146,14 @@ class CastVideo extends PlayerEvent {
   @override
   List<Object> get props => [];
 }
+
+
+class UpdateCastState extends PlayerEvent {
+  final bool isCasting;
+  final String? deviceName;
+
+  const UpdateCastState({required this.isCasting, this.deviceName});
+
+  @override
+  List<Object?> get props => [isCasting, deviceName];
+}

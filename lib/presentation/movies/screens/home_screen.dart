@@ -3,6 +3,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_cast_framework/cast.dart';
+import 'package:flutter_cast_framework/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
@@ -526,6 +528,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       appBar: AppBar(
                         title: const Text('PureVideo'),
                         actions: [
+                          if (!DeviceUtils.isTv)
+                            CastButton(
+                              castFramework: getIt<FlutterCastFramework>(),
+                              activeColor: _kNetflixRed,
+                              color: Colors.white,
+                              disabledColor: Colors.white60,
+                            ),
                           IconButton(
                             icon: const Icon(Icons.search),
                             onPressed: () => context.go('/search'),
@@ -717,6 +726,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                if (!DeviceUtils.isTv)
+                  CastButton(
+                    castFramework: getIt<FlutterCastFramework>(),
+                    activeColor: _kNetflixRed,
+                    color: Colors.white,
+                    disabledColor: Colors.white60,
+                  ),
                 IconButton(
                   icon:
                       const Icon(Icons.search, color: Colors.white, size: 26),
