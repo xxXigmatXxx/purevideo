@@ -43,9 +43,10 @@ class BajeczkiSearchRepository implements SearchRepository {
     final catsData = await catsFuture;
 
     final out = <ServiceMovieModel>[];
+    final seenKeys = <String>{};
     final seenUrls = <String>{};
 
-    // 1. Matching series categories (check first post has embed + poster)
+    // 1. Matching series categories (check first post has playable embed + not trailer)
     if (catsData is List) {
       final catChecks = catsData.whereType<Map>().take(6).map((c) async {
         final cid = c['id'];
@@ -54,12 +55,18 @@ class BajeczkiSearchRepository implements SearchRepository {
         if (cid is! int ||
             count <= 0 ||
             cid == BajeczkiMovieRepository.moviesCategoryId ||
-            slug.contains('zwiastun')) {
+            cid == BajeczkiMovieRepository.trailerCategoryId ||
+            cid == 6947 ||
+            cid == 6954 ||
+            slug.contains('zwiastun') ||
+            slug.contains('trailer')) {
           return null;
         }
         final name =
             BajeczkiMovieRepository.decodeHtmlText((c['name'] ?? '').toString());
-        if (name.isEmpty) return null;
+        if (name.isEmpty || BajeczkiMovieRepository.isTrailerOrPromo(name)) {
+          return null;
+        }
 
         try {
           final pResp = await _dio.get('/posts', queryParameters: {
@@ -88,18 +95,23 @@ class BajeczkiSearchRepository implements SearchRepository {
       });
       final resolvedCats = await Future.wait(catChecks);
       for (final m in resolvedCats.whereType<ServiceMovieModel>()) {
-        if (seenUrls.add(m.url)) out.add(m);
+        final key = 's:${m.title.toLowerCase()}';
+        if (seenUrls.add(m.url) && seenKeys.add(key)) out.add(m);
       }
     }
 
-    // 2. Matching individual posts/movies with playable embeds
+    // 2. Only full movies (cat 1924) from post search; avoid leaking individual episode posts as movies
     if (postsData is List) {
       for (final item in postsData) {
         if (item is! Map) continue;
         final id = item['id'];
         if (id == null) continue;
+        final cats =
+            (item['categories'] as List?)?.whereType<int>().toList() ?? const <int>[];
+        if (!cats.contains(BajeczkiMovieRepository.moviesCategoryId)) continue;
+
         final rawTitle = (item['title']?['rendered'] ?? '').toString();
-        if (rawTitle.toLowerCase().contains('zwiastun')) continue;
+        if (BajeczkiMovieRepository.isTrailerOrPromo(rawTitle, cats)) continue;
 
         final content = (item['content']?['rendered'] ?? '').toString();
         if (BajeczkiMovieRepository.extractEmbedLinks(content).isEmpty) {
@@ -110,7 +122,8 @@ class BajeczkiSearchRepository implements SearchRepository {
         if (title.isEmpty) continue;
         final poster = BajeczkiMovieRepository.extractFeaturedPoster(item);
         final url = '/bajeczki/movie/$id';
-        if (seenUrls.add(url)) {
+        final key = 'm:${title.toLowerCase()}';
+        if (seenUrls.add(url) && seenKeys.add(key)) {
           out.add(ServiceMovieModel(
             service: SupportedService.bajeczki,
             url: url,

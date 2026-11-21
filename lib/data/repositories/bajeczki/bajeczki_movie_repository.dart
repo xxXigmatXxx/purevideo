@@ -8,12 +8,26 @@ import 'package:purevideo/data/repositories/movie_repository.dart';
 
 class BajeczkiMovieRepository implements MovieRepository {
   static const int moviesCategoryId = 1924; // ► Filmy
+  static const int trailerCategoryId = 6143; // Zwiastun
   static const Set<int> _ignoredCategoryIds = {
     1, // Bez kategorii
     moviesCategoryId,
+    trailerCategoryId,
     6947, // Artykuł
     6954, // Filmy (empty parent)
   };
+
+  static bool isTrailerOrPromo(String rawTitle, [List<int> catIds = const []]) {
+    if (catIds.contains(trailerCategoryId) || catIds.contains(6947)) {
+      return true;
+    }
+    final lower = rawTitle.toLowerCase();
+    return lower.contains('zwiastun') ||
+        lower.contains('trailer') ||
+        lower.contains('zapowied') ||
+        lower.contains('teaser') ||
+        lower.contains('wraca!!!');
+  }
 
   final Dio _dio = Dio(BaseOptions(
     baseUrl: 'https://bajeczki.org/wp-json/wp/v2',
@@ -207,12 +221,11 @@ class BajeczkiMovieRepository implements MovieRepository {
     if (recentData is List) {
       for (final item in recentData) {
         if (item is! Map) continue;
+        final cats = (item['categories'] as List?)?.whereType<int>().toList() ?? const <int>[];
         final titleRaw = (item['title']?['rendered'] ?? '').toString();
-        if (titleRaw.toLowerCase().contains('zwiastun')) continue;
+        if (isTrailerOrPromo(titleRaw, cats)) continue;
         final content = (item['content']?['rendered'] ?? '').toString();
         if (extractEmbedLinks(content).isEmpty) continue;
-
-        final cats = (item['categories'] as List?)?.whereType<int>() ?? const [];
         for (final cid in cats) {
           if (_ignoredCategoryIds.contains(cid) || !seenCatIds.add(cid)) {
             continue;
@@ -240,15 +253,19 @@ class BajeczkiMovieRepository implements MovieRepository {
     }
 
     // 2. Full feature movies from ► Filmy (cat 1924)
+    final seenTitles = <String>{};
     if (moviesData is List) {
       for (final item in moviesData) {
         if (item is! Map) continue;
         final id = item['id'];
         if (id == null) continue;
+        final cats = (item['categories'] as List?)?.whereType<int>().toList() ?? const <int>[];
         final rawTitle = (item['title']?['rendered'] ?? '').toString();
+        if (isTrailerOrPromo(rawTitle, cats)) continue;
         final title = cleanDisplayTitle(rawTitle);
+        final normKey = title.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
         final content = (item['content']?['rendered'] ?? '').toString();
-        if (title.isEmpty || extractEmbedLinks(content).isEmpty) continue;
+        if (title.isEmpty || !seenTitles.add(normKey) || extractEmbedLinks(content).isEmpty) continue;
         final poster = extractFeaturedPoster(item);
         results.add(ServiceMovieModel(
           service: SupportedService.bajeczki,
