@@ -11,6 +11,7 @@ import 'package:hive/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:purevideo/core/services/media_service.dart';
+import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
@@ -58,6 +59,9 @@ void main() async {
   setupHiveAdapters();
   setupInjection();
   await getIt<SettingsService>().init();
+  if (getIt<SettingsService>().extraSourcesEnabled) {
+    getIt<ExtraSourcesService>().syncRemoteSources();
+  }
   await getIt<WatchedService>().init();
   try {
     await getIt<MediaService>().init();

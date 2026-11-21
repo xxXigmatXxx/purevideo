@@ -3,6 +3,7 @@ import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:purevideo/core/services/merg_service.dart';
+import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/movie_model.dart';
@@ -139,12 +140,19 @@ class MovieDetailsBloc extends Bloc<MovieDetailsEvent, MovieDetailsState> {
       final services = <ServiceMovieDetailsModel>[];
       final detailsFutures = <Future<ServiceMovieDetailsModel?>>[];
 
-      final ekinoMovieEntries = event.movie.services
+      final settingsService = getIt<SettingsService>();
+      final activeMovieServices = event.movie.services
+          .where((s) => settingsService.isServiceEnabled(s.service))
+          .toList();
+      final effectiveServices = activeMovieServices.isNotEmpty
+          ? activeMovieServices
+          : event.movie.services;
+      final ekinoMovieEntries = effectiveServices
           .where((s) =>
               s.service == SupportedService.ekino &&
               !s.url.toLowerCase().contains('/serie/'))
           .toList();
-      final primaryEntries = event.movie.services
+      final primaryEntries = effectiveServices
           .where((s) =>
               s.service != SupportedService.ekino ||
               s.url.toLowerCase().contains('/serie/'))

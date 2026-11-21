@@ -11,7 +11,11 @@ class SettingsService {
   static const String _isDarkModeKey = 'isDarkMode';
   static const String _isSystemBrightnessKey = 'isSystemBrightness';
   static const String _myListKey = 'myListJson';
-  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v10';
+  static const String _cachedHomeMoviesKey = 'cachedHomeMoviesJson_v11';
+  static const String _extraSourcesEnabledKey = 'extraSourcesEnabled';
+  static const String _remoteSourcesKey = 'remoteExtraSourcesJson';
+  static const String _localSourcesKey = 'localExtraSourcesJson';
+  static const String _extraSourcesVersionKey = 'extraSourcesVersion';
   static const String _linklessUrlsKey = 'linklessUrlsJson_v1';
   static const String _verifiedUrlsKey = 'verifiedUrlsJson_v1';
   static const String _uiStyleKey = 'uiStyle'; // 'netflix' or 'original'
@@ -195,6 +199,69 @@ class SettingsService {
             })
         .toList());
     box.put(_myListKey, encoded);
+  }
+
+
+  bool get extraSourcesEnabled =>
+      bool.parse(box.get(_extraSourcesEnabledKey) ?? 'false');
+
+  void setExtraSourcesEnabled(bool value) {
+    box.put(_extraSourcesEnabledKey, value.toString());
+  }
+
+  bool isBuiltinExtraEnabled(SupportedService service) {
+    if (!service.isExtraSource || service == SupportedService.custom) return true;
+    return bool.parse(box.get('extraBuiltin_${service.name}') ?? 'true');
+  }
+
+  void setBuiltinExtraEnabled(SupportedService service, bool value) {
+    box.put('extraBuiltin_${service.name}', value.toString());
+  }
+
+  bool isServiceEnabled(SupportedService service) {
+    if (!service.isExtraSource) return true;
+    if (!extraSourcesEnabled) return false;
+    if (service == SupportedService.custom) return true;
+    return isBuiltinExtraEnabled(service);
+  }
+
+  void bumpExtraSourcesVersion() {
+    final cur = (box.get(_extraSourcesVersionKey) as int?) ?? 0;
+    box.put(_extraSourcesVersionKey, cur + 1);
+  }
+
+  List<Map<String, dynamic>> getRemoteSourcesMaps() {
+    try {
+      final raw = box.get(_remoteSourcesKey) as String?;
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void setRemoteSourcesMaps(List<Map<String, dynamic>> list) {
+    box.put(_remoteSourcesKey, jsonEncode(list));
+  }
+
+  List<Map<String, dynamic>> getLocalSourcesMaps() {
+    try {
+      final raw = box.get(_localSourcesKey) as String?;
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void setLocalSourcesMaps(List<Map<String, dynamic>> list) {
+    box.put(_localSourcesKey, jsonEncode(list));
   }
 
   bool get isDeveloperMode =>

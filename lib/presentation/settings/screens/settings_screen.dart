@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_item.dart';
@@ -33,6 +34,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () => context.pushNamed('accounts'),
               ),
             ],
+          ),
+          const SizedBox(height: 24),
+          SettingsListenable(
+            builder: (context, _, __) {
+              return SettingsSection(
+                title: 'Źródła',
+                items: [
+                  SettingsItem(
+                    icon: Icons.extension_outlined,
+                    title: 'Źródła dodatkowe',
+                    subtitle: _settingsService.extraSourcesEnabled
+                        ? 'Włączone • kliknij aby zarządzać i synchronizować'
+                        : 'Wyłączone • włącz aby dodać nowe serwisy',
+                    onTap: () => context.pushNamed('extra_sources'),
+                    trailing: Switch(
+                      value: _settingsService.extraSourcesEnabled,
+                      onChanged: (value) {
+                        _settingsService.setExtraSourcesEnabled(value);
+                        getIt<ExtraSourcesService>().notifyChanged();
+                        if (value) {
+                          getIt<ExtraSourcesService>().syncRemoteSources();
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 24),
           SettingsSection(

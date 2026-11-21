@@ -1,7 +1,7 @@
 import 'package:hive/hive.dart';
 import 'package:purevideo/core/services/captcha_service.dart';
 
-enum SupportedService { filman, obejrzyjto, ekino, docchi, bajeczki }
+enum SupportedService { filman, obejrzyjto, ekino, docchi, bajeczki, custom }
 
 class SupportedServiceAdapter extends TypeAdapter<SupportedService> {
   @override
@@ -25,12 +25,18 @@ class SupportedServiceAdapter extends TypeAdapter<SupportedService> {
 enum InputType { text, password, recaptcha }
 
 extension SupportedServiceExtension on SupportedService {
+  bool get isExtraSource =>
+      this == SupportedService.docchi ||
+      this == SupportedService.bajeczki ||
+      this == SupportedService.custom;
+
   String get displayName => switch (this) {
         SupportedService.filman => 'Filman.cc',
         SupportedService.obejrzyjto => 'Obejrzyj.to',
         SupportedService.ekino => 'Ekino.ws',
         SupportedService.docchi => 'Docchi.pl (Anime)',
         SupportedService.bajeczki => 'Bajeczki.org',
+        SupportedService.custom => 'Źródła dodatkowe',
       };
 
   String get image => switch (this) {
@@ -42,6 +48,7 @@ extension SupportedServiceExtension on SupportedService {
         SupportedService.docchi => 'https://docchi.pl/logo192.png',
         SupportedService.bajeczki =>
           'https://bajeczki.org/wp-content/uploads/2026/06/logo.png',
+        SupportedService.custom => 'https://docchi.pl/logo192.png',
       };
 
   List<Map<String, InputType>> get loginRequiredFields => switch (this) {
@@ -59,6 +66,7 @@ extension SupportedServiceExtension on SupportedService {
           ],
         SupportedService.docchi => const [],
         SupportedService.bajeczki => const [],
+        SupportedService.custom => const [],
       };
 
   bool get canBeAnonymous => switch (this) {
@@ -67,6 +75,7 @@ extension SupportedServiceExtension on SupportedService {
         SupportedService.ekino => true,
         SupportedService.docchi => true,
         SupportedService.bajeczki => true,
+        SupportedService.custom => true,
       };
 
   String get baseUrl => switch (this) {
@@ -75,6 +84,7 @@ extension SupportedServiceExtension on SupportedService {
         SupportedService.ekino => 'https://ekino.ws',
         SupportedService.docchi => 'https://docchi.pl',
         SupportedService.bajeczki => 'https://bajeczki.org',
+        SupportedService.custom => '',
       };
 
   CaptchaConfig get loginCaptchaConfig => switch (this) {
@@ -99,6 +109,11 @@ extension SupportedServiceExtension on SupportedService {
             isInvisible: false,
           ),
         SupportedService.bajeczki => CaptchaConfig(
+            service: CaptchaServiceProvider.recaptcha,
+            siteKey: '',
+            isInvisible: false,
+          ),
+        SupportedService.custom => CaptchaConfig(
             service: CaptchaServiceProvider.recaptcha,
             siteKey: '',
             isInvisible: false,

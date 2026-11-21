@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:purevideo/core/services/merg_service.dart';
+import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/movie_model.dart';
@@ -16,6 +17,8 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
   final Map<SupportedService, MovieRepository> _repositories = getIt();
   final Map<SupportedService, AuthRepository> _authRepositories = getIt();
   final SettingsService _settingsService = getIt<SettingsService>();
+  final ExtraSourcesService _extraSourcesService = getIt<ExtraSourcesService>();
+  StreamSubscription<void>? _extraSub;
   final List<MovieModel> _movies = [];
   final List<StreamSubscription<AuthModel>> _authSubscriptions = [];
   bool _isRefreshing = false;
@@ -24,6 +27,9 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
   MoviesBloc() : super(MoviesInitial()) {
     on<LoadMoviesRequested>(_onLoadMoviesRequested);
     _setupAuthListeners();
+    _extraSub = _extraSourcesService.changesStream.listen((_) {
+      add(LoadMoviesRequested());
+    });
   }
 
   void _setupAuthListeners() {
@@ -37,6 +43,7 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
 
   @override
   Future<void> close() {
+    _extraSub?.cancel();
     for (final subscription in _authSubscriptions) {
       subscription.cancel();
     }
@@ -73,7 +80,9 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
     _isRefreshing = true;
     try {
       final loggedServices = _authRepositories.entries
-          .where((entry) => entry.value.getAccount() != null)
+          .where((entry) =>
+              entry.value.getAccount() != null &&
+              _settingsService.isServiceEnabled(entry.key))
           .map((entry) => entry.key)
           .toSet();
 

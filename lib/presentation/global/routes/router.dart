@@ -16,6 +16,7 @@ import 'package:purevideo/presentation/player/screens/player_screen.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/presentation/settings/screens/theme_screen.dart';
+import 'package:purevideo/presentation/settings/screens/extra_sources_screen.dart';
 
 final GoRouter router = GoRouter(
   initialLocation: '/',
@@ -47,6 +48,13 @@ final GoRouter router = GoRouter(
       name: 'theme',
       pageBuilder: (context, state) {
         return const NoTransitionPage(child: ThemeScreen());
+      },
+    ),
+    GoRoute(
+      path: '/settings/extra-sources',
+      name: 'extra_sources',
+      pageBuilder: (context, state) {
+        return const NoTransitionPage(child: ExtraSourcesScreen());
       },
     ),
     GoRoute(

@@ -34,7 +34,9 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
 
     try {
       final loggedServiceEntries = _searchRepositories.entries
-          .where((entry) => _authRepositories[entry.key]?.getAccount() != null)
+          .where((entry) =>
+              _authRepositories[entry.key]?.getAccount() != null &&
+              _settingsService.isServiceEnabled(entry.key))
           .toList();
 
       if (loggedServiceEntries.isEmpty) {

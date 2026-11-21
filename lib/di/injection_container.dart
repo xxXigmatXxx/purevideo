@@ -30,7 +30,11 @@ import 'package:purevideo/data/repositories/docchi/docchi_movie_repository.dart'
 import 'package:purevideo/data/repositories/docchi/docchi_search_repository.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_auth_repository.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_movie_repository.dart';
+import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_search_repository.dart';
+import 'package:purevideo/data/repositories/custom/custom_auth_repository.dart';
+import 'package:purevideo/data/repositories/custom/custom_movie_repository.dart';
+import 'package:purevideo/data/repositories/custom/custom_search_repository.dart';
 
 final getIt = GetIt.instance;
 
@@ -55,6 +59,7 @@ void setupInjection() {
   getIt.registerSingleton<MergeService>(MergeService());
   getIt.registerSingleton<MediaService>(MediaService());
   getIt.registerSingleton<SettingsService>(SettingsService());
+  getIt.registerSingleton<ExtraSourcesService>(ExtraSourcesService());
   getIt.registerSingleton<WatchedService>(WatchedService());
 
   getIt.registerSingleton<FilmwebInfoRepository>(FilmwebInfoRepository());
@@ -65,6 +70,7 @@ void setupInjection() {
     SupportedService.ekino: EkinoAuthRepository(),
     SupportedService.docchi: DocchiAuthRepository(),
     SupportedService.bajeczki: BajeczkiAuthRepository(),
+    SupportedService.custom: CustomAuthRepository(),
   });
   getIt.registerSingleton<Map<SupportedService, MovieRepository>>({
     SupportedService.filman: FilmanMovieRepository(),
@@ -72,6 +78,7 @@ void setupInjection() {
     SupportedService.ekino: EkinoMovieRepository(),
     SupportedService.docchi: DocchiMovieRepository(),
     SupportedService.bajeczki: BajeczkiMovieRepository(),
+    SupportedService.custom: CustomMovieRepository(),
   });
   getIt.registerSingleton<Map<SupportedService, SearchRepository>>({
     SupportedService.filman: FilmanSearchRepository(),
@@ -79,6 +86,7 @@ void setupInjection() {
     SupportedService.ekino: EkinoSearchRepository(),
     SupportedService.docchi: DocchiSearchRepository(),
     SupportedService.bajeczki: BajeczkiSearchRepository(),
+    SupportedService.custom: CustomSearchRepository(),
   });
   getIt.registerSingleton<GlobalContext>(GlobalContext());
 }
