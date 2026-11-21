@@ -18,6 +18,8 @@ class AccountsScreen extends StatelessWidget {
     SupportedService.filman,
     SupportedService.obejrzyjto,
     SupportedService.ekino,
+    SupportedService.docchi,
+    SupportedService.bajeczki,
   ];
 
   @override

@@ -398,7 +398,63 @@ class ResolveUrlService {
         }
       } catch (_) {}
     }
+    final cdaMatch = RegExp(
+      r'^https?://(?:www\.|m\.)?cda\.pl/video/([a-zA-Z0-9]+)',
+      caseSensitive: false,
+    ).firstMatch(u);
+    if (cdaMatch != null) {
+      u = 'https://ebd.cda.pl/620x368/${cdaMatch.group(1)!}';
+    }
     return u;
+  }
+
+  String _unescapeHtml(String s) {
+    return s
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#34;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>');
+  }
+
+  String _decodeCdaFile(String raw) {
+    var a = raw;
+    for (final s in const [
+      '_XDDD',
+      '_CDA',
+      '_ADC',
+      '_CXD',
+      '_QWE',
+      '_Q5',
+      '_IKSDE',
+    ]) {
+      a = a.replaceAll(s, '');
+    }
+    try {
+      a = Uri.decodeComponent(a);
+    } catch (_) {}
+    final buf = StringBuffer();
+    for (final code in a.codeUnits) {
+      if (code >= 33 && code <= 126) {
+        buf.writeCharCode(33 + ((code + 14) % 94));
+      } else {
+        buf.writeCharCode(code);
+      }
+    }
+    var res = buf
+        .toString()
+        .replaceAll('.cda.mp4', '')
+        .replaceAll('.2cda.pl', '.cda.pl')
+        .replaceAll('.3cda.pl', '.cda.pl');
+    if (!res.startsWith('http')) {
+      res = 'https://$res.mp4';
+    } else if (!res.endsWith('.mp4')) {
+      res = '$res.mp4';
+    }
+    return res;
   }
 
   Future<String> _unwrapUrl(String url) async {
@@ -456,11 +512,24 @@ class ResolveUrlService {
     return null;
   }
 
+  List<String> _unpackAllJsPackers(String html) {
+    final results = <String>[];
+    int searchFrom = 0;
+    while (results.length < 8) {
+      final startIdx = html.indexOf('eval(function(p,a,c,k,e,', searchFrom);
+      if (startIdx == -1) break;
+      final unpacked = _unpackJsPackerAt(html, startIdx);
+      if (unpacked != null && unpacked.isNotEmpty) {
+        results.add(unpacked);
+      }
+      searchFrom = startIdx + 24;
+    }
+    return results;
+  }
+
   // Safe O(N) linear unpacker with zero regex backtracking
-  String? _unpackJsPacker(String html) {
+  String? _unpackJsPackerAt(String html, int startIdx) {
     try {
-      final startIdx = html.indexOf('eval(function(p,a,c,k,e,');
-      if (startIdx == -1) return null;
       final splitMarker = ".split('|')";
       final splitIdx = html.indexOf(splitMarker, startIdx);
       if (splitIdx == -1 || splitIdx - startIdx > 250000) return null;
@@ -724,7 +793,7 @@ class ResolveUrlService {
           currentUrl = realUri;
         }
         final jsRedirect = RegExp(
-          r'''window\.location\.href\s*=\s*["'](https?://[^"']+)["']''',
+          r'''(?:window\.location\.href|var\s+MIRROR)\s*=\s*["'](https?://[^"']+)["']''',
           caseSensitive: false,
         ).firstMatch(html);
         if (jsRedirect != null) {
@@ -838,7 +907,196 @@ class ResolveUrlService {
         }
       }
 
-      // 0b. Byse Frontend (mfw09.org, bysekoze.com, byse*, filemoon Byse)
+      // 0b. CDA.pl / ebd.cda.pl (manifest_apple HLS + ROT47 MP4 fallback)
+      if (currentUrl.contains('cda.pl') || html.contains('player_data=')) {
+        final pdMatch = RegExp(
+          r'''player_data=['"]([^'"]+)['"]''',
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (pdMatch != null) {
+          try {
+            final rawJson = _unescapeHtml(pdMatch.group(1)!);
+            final pd = jsonDecode(rawJson);
+            if (pd is Map && pd['video'] is Map) {
+              final video = pd['video'] as Map;
+              final cdaHeaders = <String, String>{
+                ...hdrs,
+                'Referer': 'https://ebd.cda.pl/',
+                'Origin': 'https://ebd.cda.pl',
+              };
+              final appleUrl =
+                  (video['manifest_apple'] ?? '').toString().trim();
+              if (appleUrl.startsWith('http')) {
+                return [
+                  VideoSource(
+                    url: appleUrl,
+                    lang: link.lang,
+                    quality: link.quality.isNotEmpty ? link.quality : 'HD',
+                    host: 'CDA (HLS)',
+                    headers: cdaHeaders,
+                  ),
+                ];
+              }
+              final encFile = (video['file'] ?? '').toString().trim();
+              if (encFile.isNotEmpty) {
+                final mp4Url = _decodeCdaFile(encFile);
+                if (mp4Url.startsWith('http')) {
+                  return [
+                    VideoSource(
+                      url: mp4Url,
+                      lang: link.lang,
+                      quality: link.quality.isNotEmpty ? link.quality : 'HD',
+                      host: 'CDA',
+                      headers: cdaHeaders,
+                    ),
+                  ];
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 0c. Goodstream.vip (window.__PCr base64 JSON)
+      if (currentUrl.contains('goodstream.') || html.contains('window.__PCr=')) {
+        final pcrMatch =
+            RegExp(r'''window\.__PCr\s*=\s*['"]([A-Za-z0-9+/=_-]+)['"]''')
+                .firstMatch(html);
+        if (pcrMatch != null) {
+          try {
+            var b64 = pcrMatch.group(1)!.replaceAll('-', '+').replaceAll('_', '/');
+            b64 += '=' * ((4 - b64.length % 4) % 4);
+            final decoded = utf8.decode(base64Decode(b64), allowMalformed: true);
+            final jsonObj = jsonDecode(decoded);
+            if (jsonObj is Map) {
+              final src = (jsonObj['src'] ?? '').toString().trim();
+              if (src.startsWith('http')) {
+                return [
+                  VideoSource(
+                    url: src,
+                    lang: link.lang,
+                    quality: link.quality.isNotEmpty ? link.quality : 'HD',
+                    host: 'Goodstream',
+                    headers: {...hdrs, 'Referer': currentUrl},
+                  ),
+                ];
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 0d. Vidara (vidara.to / czzbgnw.com / /api/stream)
+      if (html.contains('/api/stream') &&
+          (currentUrl.contains('vidara.') ||
+              currentUrl.contains('czzbgnw.') ||
+              html.contains('globalFilecode'))) {
+        final codeMatch =
+            RegExp(r'/(?:e|v)/([a-zA-Z0-9_-]+)').firstMatch(currentUrl);
+        if (codeMatch != null) {
+          try {
+            final apiResp = await _extDio.post<String>(
+              '$origin/api/stream',
+              data: jsonEncode({'filecode': codeMatch.group(1)!}),
+              options: Options(headers: {
+                ...hdrs,
+                'Referer': currentUrl,
+                'Content-Type': 'application/json',
+              }),
+            );
+            if (apiResp.data != null && apiResp.data!.isNotEmpty) {
+              final streamJson = jsonDecode(apiResp.data!);
+              if (streamJson is Map) {
+                final sUrl =
+                    (streamJson['streaming_url'] ?? '').toString().trim();
+                if (sUrl.startsWith('http')) {
+                  return [
+                    VideoSource(
+                      url: sUrl,
+                      lang: link.lang,
+                      quality: link.quality.isNotEmpty ? link.quality : 'HD',
+                      host: 'Vidara',
+                      headers: {...hdrs, 'Referer': currentUrl},
+                    ),
+                  ];
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 0e. OK.ru (data-options -> flashvars.metadata)
+      if (currentUrl.contains('ok.ru') || currentUrl.contains('odnoklassniki')) {
+        final optMatch =
+            RegExp(r'''data-options=["']([^"']+)["']''').firstMatch(html);
+        if (optMatch != null) {
+          try {
+            final opt = jsonDecode(_unescapeHtml(optMatch.group(1)!));
+            if (opt is Map) {
+              final rawMeta = opt['flashvars']?['metadata'];
+              final meta = rawMeta is String
+                  ? jsonDecode(rawMeta)
+                  : (rawMeta is Map ? rawMeta : null);
+              if (meta is Map) {
+                final hlsUrl = (meta['ondemandHls'] ??
+                        meta['hlsMasterPlaylistUrl'] ??
+                        '')
+                    .toString()
+                    .trim();
+                if (hlsUrl.startsWith('http')) {
+                  return [
+                    VideoSource(
+                      url: hlsUrl,
+                      lang: link.lang,
+                      quality: 'HD',
+                      host: 'OK.ru',
+                      headers: {...hdrs, 'Referer': currentUrl},
+                    ),
+                  ];
+                }
+                final vids = (meta['videos'] as List?) ?? const [];
+                final out = <VideoSource>[];
+                for (final v in vids.whereType<Map>().toList().reversed) {
+                  final vu = (v['url'] ?? '').toString().trim();
+                  final qName = (v['name'] ?? '').toString().toUpperCase();
+                  if (vu.startsWith('http')) {
+                    out.add(VideoSource(
+                      url: vu,
+                      lang: link.lang,
+                      quality: qName.isEmpty ? 'HD' : qName,
+                      host: qName.isEmpty ? 'OK.ru' : 'OK.ru ($qName)',
+                      headers: {...hdrs, 'Referer': currentUrl},
+                    ));
+                  }
+                }
+                if (out.isNotEmpty) return out;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 0f. MP4Upload (player.src({ type: "video/mp4", src: "..." }))
+      if (currentUrl.contains('mp4upload.')) {
+        final mpMatch = RegExp(
+          r'''player\.src\s*\(\s*\{[^}]*?src\s*:\s*["'](https?://[^"']+)["']''',
+          dotAll: true,
+        ).firstMatch(html);
+        if (mpMatch != null) {
+          return [
+            VideoSource(
+              url: mpMatch.group(1)!,
+              lang: link.lang,
+              quality: link.quality.isNotEmpty ? link.quality : 'HD',
+              host: 'MP4Upload',
+              headers: {...hdrs, 'Referer': 'https://www.mp4upload.com/'},
+            ),
+          ];
+        }
+      }
+
+      // 0g. Byse Frontend (mfw09.org, bysekoze.com, byse*, filemoon Byse)
       if (allowByse &&
           (html.contains('Byse Frontend') ||
               html.contains('video-embed-mode') ||
@@ -918,10 +1176,9 @@ class ResolveUrlService {
         }
       }
 
-      // 3. JS Packer (shvid, vmoly, file1, mixdrop, luluvdo, vtube)
+      // 3. JS Packer (shvid, vidmoly, filelions, earnvids, streamwish, mixdrop, luluvdo/lulustream, vtube)
       if (html.contains('eval(function(p,a,c,k,e,')) {
-        final unpacked = _unpackJsPacker(html);
-        if (unpacked != null && unpacked.isNotEmpty) {
+        for (final unpacked in _unpackAllJsPackers(html)) {
           final mdMatch = RegExp(
             r'''wurl\s*=\s*["']([^"']+)["']''',
           ).firstMatch(unpacked);
@@ -942,7 +1199,7 @@ class ResolveUrlService {
           }
 
           final fileMatch = RegExp(
-            r'''(?:file|src)\s*:\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']''',
+            r'''(?:file|src|hls\d*)\s*[:=]\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']''',
             caseSensitive: false,
           ).firstMatch(unpacked);
           if (fileMatch != null) {
@@ -959,7 +1216,7 @@ class ResolveUrlService {
                 lang: link.lang,
                 quality: link.quality,
                 host: hName,
-                headers: hdrs,
+                headers: {...hdrs, 'Referer': currentUrl},
               )
             ];
           }

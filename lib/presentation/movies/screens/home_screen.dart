@@ -264,6 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Prefer specific genres/curated categories over generic catch-alls
     for (final c in const [
       'Bajki dla dzieci',
+      'Anime',
       'Familijne',
       'Popularne seriale',
       'Akcja',
@@ -306,6 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final ordered = <String>[];
     for (final priority in const [
       'Bajki dla dzieci',
+      'Anime',
       'Familijne',
       'Popularne seriale',
       'Popularne filmy',
@@ -353,6 +355,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final ordered = <String, List<MovieModel>>{};
     for (final priority in const [
       'Bajki dla dzieci',
+      'Anime',
       'Familijne',
       'Popularne seriale',
       'Akcja',

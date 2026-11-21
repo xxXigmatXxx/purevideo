@@ -25,6 +25,12 @@ import 'package:purevideo/data/repositories/auth_repository.dart';
 import 'package:purevideo/data/repositories/filman/filman_auth_repository.dart';
 import 'package:purevideo/data/repositories/filman/filman_movie_repository.dart';
 import 'package:purevideo/data/repositories/movie_repository.dart';
+import 'package:purevideo/data/repositories/docchi/docchi_auth_repository.dart';
+import 'package:purevideo/data/repositories/docchi/docchi_movie_repository.dart';
+import 'package:purevideo/data/repositories/docchi/docchi_search_repository.dart';
+import 'package:purevideo/data/repositories/bajeczki/bajeczki_auth_repository.dart';
+import 'package:purevideo/data/repositories/bajeczki/bajeczki_movie_repository.dart';
+import 'package:purevideo/data/repositories/bajeczki/bajeczki_search_repository.dart';
 
 final getIt = GetIt.instance;
 
@@ -57,16 +63,22 @@ void setupInjection() {
     SupportedService.filman: FilmanAuthRepository(),
     SupportedService.obejrzyjto: ObejrzyjtoAuthRepository(),
     SupportedService.ekino: EkinoAuthRepository(),
+    SupportedService.docchi: DocchiAuthRepository(),
+    SupportedService.bajeczki: BajeczkiAuthRepository(),
   });
   getIt.registerSingleton<Map<SupportedService, MovieRepository>>({
     SupportedService.filman: FilmanMovieRepository(),
     SupportedService.obejrzyjto: ObejrzyjtoMovieRepository(),
     SupportedService.ekino: EkinoMovieRepository(),
+    SupportedService.docchi: DocchiMovieRepository(),
+    SupportedService.bajeczki: BajeczkiMovieRepository(),
   });
   getIt.registerSingleton<Map<SupportedService, SearchRepository>>({
     SupportedService.filman: FilmanSearchRepository(),
     SupportedService.obejrzyjto: ObejrzyjtoSearchRepository(),
     SupportedService.ekino: EkinoSearchRepository(),
+    SupportedService.docchi: DocchiSearchRepository(),
+    SupportedService.bajeczki: BajeczkiSearchRepository(),
   });
   getIt.registerSingleton<GlobalContext>(GlobalContext());
 }
