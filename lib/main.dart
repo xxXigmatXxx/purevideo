@@ -12,6 +12,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:purevideo/core/services/media_service.dart';
 import 'package:purevideo/core/services/extra_sources_service.dart';
+import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
@@ -62,6 +63,7 @@ void main() async {
   if (getIt<SettingsService>().extraSourcesEnabled) {
     getIt<ExtraSourcesService>().syncRemoteSources();
   }
+  getIt<AppUpdateService>().checkForUpdates();
   await getIt<WatchedService>().init();
   try {
     await getIt<MediaService>().init();

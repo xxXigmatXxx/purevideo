@@ -25,10 +25,7 @@ class SupportedServiceAdapter extends TypeAdapter<SupportedService> {
 enum InputType { text, password, recaptcha }
 
 extension SupportedServiceExtension on SupportedService {
-  bool get isExtraSource =>
-      this == SupportedService.docchi ||
-      this == SupportedService.bajeczki ||
-      this == SupportedService.custom;
+  bool get isExtraSource => this == SupportedService.custom;
 
   String get displayName => switch (this) {
         SupportedService.filman => 'Filman.cc',

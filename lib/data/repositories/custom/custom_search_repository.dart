@@ -1,3 +1,4 @@
+import 'package:diacritic/diacritic.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html;
@@ -14,7 +15,7 @@ class CustomSearchRepository implements SearchRepository {
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 12),
     receiveTimeout: const Duration(seconds: 15),
-    headers: const {
+    headers: {
       'User-Agent': WebViewService.cleanUserAgent,
     },
   ));
@@ -82,11 +83,10 @@ class CustomSearchRepository implements SearchRepository {
             final imgUrl =
                 CustomMovieRepository.resolveUrl(src.baseUrl, rawImg)
                     .replaceAll('/static/thumb/', '/static/normal/');
-            var title = (a.attributes['title'] ??
-                    img?.attributes['alt'] ??
-                    a.text)
-                .replaceAll(RegExp(r'\s+'), ' ')
-                .trim();
+            var title =
+                (a.attributes['title'] ?? img?.attributes['alt'] ?? a.text)
+                    .replaceAll(RegExp(r'\s+'), ' ')
+                    .trim();
             if (title.contains(' / ')) title = title.split(' / ').first.trim();
             if (title.isEmpty) continue;
             out.add(ServiceMovieModel(
@@ -96,7 +96,9 @@ class CustomSearchRepository implements SearchRepository {
               imageUrl: imgUrl,
               category: href.contains('/serie/')
                   ? 'Popularne seriale'
-                  : (src.category.isNotEmpty ? src.category : 'Popularne filmy'),
+                  : (src.category.isNotEmpty
+                      ? src.category
+                      : 'Popularne filmy'),
             ));
             if (out.length >= 20) break;
           }
@@ -122,13 +124,44 @@ class CustomSearchRepository implements SearchRepository {
 
   @override
   Future<List<ServiceMovieModel>> searchMovies(String query) async {
-    final sources = getIt<ExtraSourcesService>().getAllActiveCustomSources();
-    if (sources.isEmpty) return const [];
+    final extra = getIt<ExtraSourcesService>();
+    final out = <ServiceMovieModel>[];
+    final normQ = removeDiacritics(query.toLowerCase().trim());
 
-    final lists = await Future.wait(
-      sources.map((s) => _searchInSource(s, query)
-          .timeout(const Duration(seconds: 12), onTimeout: () => const [])),
-    );
-    return lists.expand((e) => e).toList();
+    // 1. Search curated Movies & Series (CDA / Vider.info)
+    if (normQ.isNotEmpty) {
+      for (final media in extra.getAllActiveCustomMedia()) {
+        final normT = removeDiacritics(media.title.toLowerCase());
+        if (normT.contains(normQ)) {
+          final defaultCat =
+              media.isSeries ? 'Popularne seriale' : 'Popularne filmy';
+          final cat = media.category.isNotEmpty
+              ? (media.isSeries &&
+                      !media.category.toLowerCase().contains('serial')
+                  ? '${media.category}|Popularne seriale'
+                  : media.category)
+              : defaultCat;
+          out.add(ServiceMovieModel(
+            service: SupportedService.custom,
+            url: CustomMovieRepository.encodeMediaUrl(media),
+            title: media.title,
+            imageUrl: media.posterUrl,
+            category: '$cat|Źródła dodatkowe',
+          ));
+        }
+      }
+    }
+
+    // 2. Search optional website sources
+    final sources = extra.getAllActiveCustomSources();
+    if (sources.isNotEmpty) {
+      final lists = await Future.wait(
+        sources.map((s) => _searchInSource(s, query)
+            .timeout(const Duration(seconds: 12), onTimeout: () => const [])),
+      );
+      out.addAll(lists.expand((e) => e));
+    }
+
+    return out;
   }
 }

@@ -379,6 +379,13 @@ class ResolveUrlService {
   String _cleanEmbedUrl(String rawUrl) {
     var u = rawUrl.trim();
     if (u.startsWith('//')) u = 'https:$u';
+    final cdaWatch = RegExp(
+      r'^https?://(?:www\.|m\.)?cda\.pl/video/([a-zA-Z0-9]+)',
+      caseSensitive: false,
+    ).firstMatch(u);
+    if (cdaWatch != null) {
+      return 'https://ebd.cda.pl/620x368/${cdaWatch.group(1)!}';
+    }
     if (u.contains('tmp-url.pro/?u=')) {
       try {
         final uri = Uri.parse(u);
@@ -757,11 +764,197 @@ class ResolveUrlService {
     }
   }
 
+  Future<List<VideoSource>> _resolveViderInDart(
+    HostLink link,
+    String currentUrl,
+  ) async {
+    try {
+      final candidateUrls = <String>[];
+      final embedMatch = RegExp(
+        r'/embed/video/([a-zA-Z0-9]+)',
+        caseSensitive: false,
+      ).firstMatch(currentUrl);
+      final vidPlusF = RegExp(
+        r'/vid/\+f([a-zA-Z0-9]+)',
+        caseSensitive: false,
+      ).firstMatch(currentUrl);
+      final vidAny = RegExp(
+        r'/vid/\+?([a-zA-Z0-9]+)',
+        caseSensitive: false,
+      ).firstMatch(currentUrl);
+
+      if (embedMatch != null) {
+        final c = embedMatch.group(1)!;
+        candidateUrls.addAll([
+          'https://vider.pl/embed/video/$c',
+          'https://vider.info/embed/video/$c',
+        ]);
+      } else if (vidPlusF != null) {
+        final c = vidPlusF.group(1)!;
+        candidateUrls.addAll([
+          'https://vider.pl/embed/video/$c',
+          'https://vider.info/embed/video/$c',
+          'https://vider.pl/embed/video/f$c',
+          'https://vider.info/embed/video/f$c',
+          currentUrl,
+        ]);
+      } else if (vidAny != null) {
+        final c = vidAny.group(1)!;
+        candidateUrls.addAll([
+          'https://vider.pl/embed/video/$c',
+          'https://vider.info/embed/video/$c',
+          currentUrl,
+        ]);
+      } else {
+        candidateUrls.add(currentUrl);
+      }
+
+      final cookiesMap = <String, String>{};
+      void absorbCookies(Headers hdrs) {
+        final setCookies = hdrs.map['set-cookie'] ?? const <String>[];
+        for (final raw in setCookies) {
+          final firstPart = raw.split(';').first.trim();
+          final eq = firstPart.indexOf('=');
+          if (eq > 0) {
+            final k = firstPart.substring(0, eq).trim();
+            final v = firstPart.substring(eq + 1).trim();
+            if (v != 'deleted' && v.isNotEmpty) {
+              cookiesMap[k] = v;
+            }
+          }
+        }
+      }
+
+      const viderUa =
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+      for (final target in candidateUrls.toSet()) {
+        final targetUri = Uri.tryParse(target);
+        final origin = targetUri != null && targetUri.host.isNotEmpty
+            ? '${targetUri.scheme}://${targetUri.host}'
+            : 'https://vider.info';
+        final cookieHeader =
+            cookiesMap.entries.map((e) => '${e.key}=${e.value}').join('; ');
+
+        final resp = await _extDio.get<String>(
+          target,
+          options: Options(headers: {
+            'User-Agent': viderUa,
+            'Referer': '$origin/',
+            'Accept':
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7',
+            if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
+          }),
+        );
+        absorbCookies(resp.headers);
+        final html = resp.data ?? '';
+        if (html.isEmpty) continue;
+
+        String? streamUrl;
+        final videoUrlAttr = RegExp(
+          r'''data-video-url=["'](https?://[^"']+)["']''',
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (videoUrlAttr != null) {
+          streamUrl = videoUrlAttr.group(1)!.trim();
+          if (!streamUrl.contains('uid=')) {
+            streamUrl = streamUrl.contains('?')
+                ? '$streamUrl&uid=0'
+                : '$streamUrl?uid=0';
+          }
+        }
+
+        if (streamUrl == null) {
+          final fileIdMatch = RegExp(
+            r'''data-file-id=["'](\d+)["']''',
+            caseSensitive: false,
+          ).firstMatch(html);
+          if (fileIdMatch != null) {
+            final fileId = fileIdMatch.group(1)!;
+            streamUrl = 'https://stream.vider.info/video/$fileId/v.mp4?uid=0';
+          }
+        }
+
+        if (streamUrl == null) {
+          final directStreamMatch = RegExp(
+            r'''https?://stream\.vider\.(?:info|pl)/video/[^\s"'<>]+''',
+            caseSensitive: false,
+          ).firstMatch(html);
+          if (directStreamMatch != null) {
+            streamUrl = directStreamMatch.group(0)!.trim();
+          }
+        }
+
+        if (streamUrl == null) {
+          final sourceTag = RegExp(
+            r'''<source[^>]+src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']''',
+            caseSensitive: false,
+          ).firstMatch(html);
+          if (sourceTag != null) {
+            var sUrl = sourceTag.group(1)!.trim();
+            if (sUrl.startsWith('//')) sUrl = 'https:$sUrl';
+            if (sUrl.startsWith('http')) streamUrl = sUrl;
+          }
+        }
+
+        if (streamUrl != null && streamUrl.startsWith('http')) {
+          final finalCookie = cookiesMap.entries
+              .map((e) => '${e.key}=${e.value}')
+              .join('; ');
+          final streamHeaders = <String, String>{
+            'User-Agent': viderUa,
+            'Referer': '$origin/',
+            'Accept': '*/*',
+            if (finalCookie.isNotEmpty) 'Cookie': finalCookie,
+          };
+
+          var resolvedStreamUrl = streamUrl;
+          try {
+            final probe = await _extDio.get(
+              streamUrl,
+              options: Options(
+                followRedirects: false,
+                validateStatus: (st) => st != null && st < 400,
+                headers: {
+                  ...streamHeaders,
+                  'Range': 'bytes=0-1',
+                },
+              ),
+            );
+            final loc = probe.headers.value('location');
+            if (loc != null && loc.startsWith('http')) {
+              resolvedStreamUrl = loc;
+            }
+          } catch (_) {}
+
+          return [
+            VideoSource(
+              url: resolvedStreamUrl,
+              lang: link.lang,
+              quality: link.quality.isNotEmpty ? link.quality : 'HD',
+              host: 'Vider.info',
+              headers: streamHeaders,
+            ),
+          ];
+        }
+      }
+    } catch (e) {
+      debugPrint('Vider resolve error: $e');
+    }
+    return const [];
+  }
+
   Future<List<VideoSource>> _resolveDirectInDart(
       HostLink link, String cleanedUrl,
       {bool allowByse = true}) async {
     try {
       var currentUrl = cleanedUrl;
+      if (currentUrl.toLowerCase().contains('vider.info') ||
+          currentUrl.toLowerCase().contains('vider.pl')) {
+        final viderSources = await _resolveViderInDart(link, currentUrl);
+        if (viderSources.isNotEmpty) return viderSources;
+      }
       if (allowByse &&
           (currentUrl.contains('mfw09.') || currentUrl.contains('byse'))) {
         final fastUri = Uri.tryParse(currentUrl);

@@ -31,6 +31,7 @@ import 'package:purevideo/data/repositories/docchi/docchi_search_repository.dart
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_auth_repository.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_movie_repository.dart';
 import 'package:purevideo/core/services/extra_sources_service.dart';
+import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_search_repository.dart';
 import 'package:purevideo/data/repositories/custom/custom_auth_repository.dart';
 import 'package:purevideo/data/repositories/custom/custom_movie_repository.dart';
@@ -60,6 +61,7 @@ void setupInjection() {
   getIt.registerSingleton<MediaService>(MediaService());
   getIt.registerSingleton<SettingsService>(SettingsService());
   getIt.registerSingleton<ExtraSourcesService>(ExtraSourcesService());
+  getIt.registerSingleton<AppUpdateService>(AppUpdateService());
   getIt.registerSingleton<WatchedService>(WatchedService());
 
   getIt.registerSingleton<FilmwebInfoRepository>(FilmwebInfoRepository());

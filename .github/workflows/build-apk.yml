@@ -23,7 +23,7 @@ jobs:
 
       - name: Generate Keystore
         run: |
-          keytool -genkey -v -keystore android/app/keystore.jks -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"
+          if [ ! -f android/app/keystore.jks ]; then keytool -genkey -v -keystore android/app/keystore.jks -alias purevideo -storepass purevideopass -keypass purevideopass -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PureVideo,O=App,C=PL"; fi
           echo "storePassword=purevideopass" > android/key.properties
           echo "keyPassword=purevideopass" >> android/key.properties
           echo "keyAlias=purevideo" >> android/key.properties
@@ -57,7 +57,7 @@ jobs:
           SERIOUS_PYTHON_SITE_PACKAGES: /tmp/serious_python_site_packages
         run: |
           set +e
-          flutter build apk --release 2>&1 | tee build_log.txt
+          flutter build apk --release --build-number=${{ github.run_number }} --build-name=1.0.${{ github.run_number }} 2>&1 | tee build_log.txt
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::error::BUILD_ERROR_LOG: $(grep -E 'Error:|FAILURE:|What went wrong:|Exception' -A 5 build_log.txt | tr '\n' ' ')"

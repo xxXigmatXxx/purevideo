@@ -1,3 +1,4 @@
+import 'package:diacritic/diacritic.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html;
@@ -14,7 +15,7 @@ class CustomMovieRepository implements MovieRepository {
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 12),
     receiveTimeout: const Duration(seconds: 15),
-    headers: const {
+    headers: {
       'User-Agent': WebViewService.cleanUserAgent,
     },
   ));
@@ -22,7 +23,10 @@ class CustomMovieRepository implements MovieRepository {
   static String encodeCustomUrl(String sourceId, String targetUrl) =>
       'custom://$sourceId|$targetUrl';
 
-  static (String sourceId, String targetUrl)? parseCustomUrl(String url) {
+  static String encodeMediaUrl(ExtraMediaEntry entry) =>
+      entry.isSeries ? 'custom://media_serial|${entry.id}' : 'custom://media_film|${entry.id}';
+
+  static (String kindOrId, String payload)? parseCustomUrl(String url) {
     if (!url.startsWith('custom://')) return null;
     final rest = url.substring('custom://'.length);
     final sep = rest.indexOf('|');
@@ -74,9 +78,10 @@ class CustomMovieRepository implements MovieRepository {
       final src = srcTag.attributes['src'] ?? '';
       if (src.isNotEmpty) addEmbed(src);
     }
+
     if (links.isEmpty) {
       final rx = RegExp(
-        r'''https?://(?:ebd\.cda\.pl|goodstream\.vip|voe\.sx|dood\.|lulustream\.|vidmoly\.|vidara\.|streamtape\.|mixdrop\.|mp4upload\.|ok\.ru)[^\s"'<>]+''',
+        r'''https?://(?:ebd\.cda\.pl|(?:www\.)?cda\.pl/video/|vider\.(?:info|pl)/|goodstream\.vip|voe\.sx|dood\.|lulustream\.|vidmoly\.|vidara\.|streamtape\.|mixdrop\.|mp4upload\.|ok\.ru)[^\s"'<>]+''',
         caseSensitive: false,
       );
       for (final m in rx.allMatches(body)) {
@@ -121,9 +126,7 @@ class CustomMovieRepository implements MovieRepository {
         continue;
       }
 
-      var title = (a.attributes['title'] ??
-              img.attributes['alt'] ??
-              a.text)
+      var title = (a.attributes['title'] ?? img.attributes['alt'] ?? a.text)
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
       if (title.isEmpty || title.length < 2 || title.length > 120) continue;
@@ -144,14 +147,13 @@ class CustomMovieRepository implements MovieRepository {
     return out;
   }
 
-  Future<List<ServiceMovieModel>> _fetchFromSource(
-      ExtraSourceConfig src) async {
+  Future<List<ServiceMovieModel>> _loadFromSource(ExtraSourceConfig src) async {
     try {
       switch (src.type) {
         case ExtraSourceType.wordpress:
           final resp = await _dio.get(
             '${src.baseUrl}/wp-json/wp/v2/posts',
-            queryParameters: {'per_page': 25, '_embed': 1},
+            queryParameters: {'per_page': 24, '_embed': 1},
             options: Options(headers: {'Referer': '${src.baseUrl}/'}),
           );
           if (resp.data is! List) return const [];
@@ -181,7 +183,7 @@ class CustomMovieRepository implements MovieRepository {
 
         case ExtraSourceType.ekinoMirror:
           final resp = await _dio.get<String>(
-            src.baseUrl,
+            '${src.baseUrl}/',
             options: Options(headers: {'Referer': '${src.baseUrl}/'}),
           );
           final doc = html.parse(resp.data ?? '');
@@ -200,85 +202,159 @@ class CustomMovieRepository implements MovieRepository {
                 img?.attributes['src'] ?? img?.attributes['data-src'] ?? '';
             final imgUrl = resolveUrl(src.baseUrl, rawImg)
                 .replaceAll('/static/thumb/', '/static/normal/');
-            var title = (a.attributes['title'] ??
-                    img?.attributes['alt'] ??
-                    a.text)
-                .replaceAll(RegExp(r'\s+'), ' ')
-                .trim();
+            var title =
+                (a.attributes['title'] ?? img?.attributes['alt'] ?? a.text)
+                    .replaceAll(RegExp(r'\s+'), ' ')
+                    .trim();
             if (title.contains(' / ')) title = title.split(' / ').first.trim();
             if (title.isEmpty) continue;
-            final isSeries = href.contains('/serie/');
             out.add(ServiceMovieModel(
               service: SupportedService.custom,
               url: encodeCustomUrl(src.id, full),
               title: title,
               imageUrl: imgUrl,
-              category: isSeries
+              category: href.contains('/serie/')
                   ? 'Popularne seriale'
                   : (src.category.isNotEmpty ? src.category : 'Popularne filmy'),
             ));
-            if (out.length >= 30) break;
+            if (out.length >= 25) break;
           }
           return out;
 
         case ExtraSourceType.htmlAuto:
           final resp = await _dio.get<String>(
-            src.baseUrl,
+            '${src.baseUrl}/',
             options: Options(headers: {'Referer': '${src.baseUrl}/'}),
           );
-          return parseHtmlCards(resp.data ?? '', src);
+          return parseHtmlCards(resp.data ?? '', src, limit: 25);
       }
     } catch (e) {
-      debugPrint('Custom source fetch failed (${src.name}): $e');
+      debugPrint('Custom source load failed (${src.name}): $e');
       return const [];
     }
   }
 
   @override
   Future<List<ServiceMovieModel>> getMovies() async {
-    final extraService = getIt<ExtraSourcesService>();
-    await extraService.syncRemoteSources().timeout(
-          const Duration(seconds: 5),
-          onTimeout: () => false,
-        );
-    final sources = extraService.getAllActiveCustomSources();
-    if (sources.isEmpty) return const [];
+    final extra = getIt<ExtraSourcesService>();
+    final out = <ServiceMovieModel>[];
 
-    final lists = await Future.wait(
-      sources.map((s) => _fetchFromSource(s)
-          .timeout(const Duration(seconds: 15), onTimeout: () => const [])),
-    );
-    return lists.expand((e) => e).toList();
+    // 1. Curated Films & Series (added via CDA / Vider.info)
+    for (final media in extra.getAllActiveCustomMedia()) {
+      final defaultCat =
+          media.isSeries ? 'Popularne seriale' : 'Popularne filmy';
+      final cat = media.category.isNotEmpty
+          ? (media.isSeries && !media.category.toLowerCase().contains('serial')
+              ? '${media.category}|Popularne seriale'
+              : media.category)
+          : defaultCat;
+      out.add(ServiceMovieModel(
+        service: SupportedService.custom,
+        url: encodeMediaUrl(media),
+        title: media.title,
+        imageUrl: media.posterUrl,
+        category: '$cat|Źródła dodatkowe',
+      ));
+    }
+
+    // 2. Optional website sources
+    final sources = extra.getAllActiveCustomSources();
+    if (sources.isNotEmpty) {
+      final lists = await Future.wait(
+        sources.map((s) => _loadFromSource(s)
+            .timeout(const Duration(seconds: 12), onTimeout: () => const [])),
+      );
+      out.addAll(lists.expand((e) => e));
+    }
+    return out;
   }
 
   @override
   Future<ServiceMovieDetailsModel> getMovieDetails(String url) async {
     final parsed = parseCustomUrl(url);
     if (parsed == null) {
-      throw Exception('Nieprawidłowy adres źródła dodatkowego');
+      throw Exception('Nieprawidłowy adres dodatkowego źródła');
     }
-    final (sourceId, targetUrl) = parsed;
-    final src = getIt<ExtraSourcesService>().findById(sourceId);
-    final baseUrl = src?.baseUrl ?? (Uri.tryParse(targetUrl)?.origin ?? '');
+    final kindOrId = parsed.$1;
+    final targetUrl = parsed.$2;
+    final extra = getIt<ExtraSourcesService>();
 
-    if (targetUrl.contains('/wp-json/wp/v2/posts/')) {
+    if (kindOrId == 'media_film' ||
+        kindOrId == 'media_serial' ||
+        kindOrId == 'media') {
+      final media = extra.findMediaById(targetUrl);
+      if (media == null) {
+        throw Exception('Nie znaleziono dodanej pozycji w źródłach dodatkowych');
+      }
+      if (!media.isSeries) {
+        return ServiceMovieDetailsModel(
+          service: SupportedService.custom,
+          url: url,
+          title: media.title,
+          description: media.description,
+          imageUrl: media.posterUrl,
+          isSeries: false,
+          videoUrls: media.links
+              .map((l) => HostLink(url: l.url, lang: l.lang, quality: l.quality))
+              .toList(),
+        );
+      }
+      final seasons = media.seasons
+          .map((s) => SeasonModel(
+                number: s.number,
+                episodes: s.episodes
+                    .map((ep) => EpisodeModel(
+                          title: ep.title.isNotEmpty
+                              ? ep.title
+                              : 'Odcinek ${ep.number}',
+                          number: ep.number,
+                          url: 'custom://episode|${media.id}|${s.number}|${ep.number}',
+                          videoUrls: ep.links
+                              .map((l) => HostLink(
+                                    url: l.url,
+                                    lang: l.lang,
+                                    quality: l.quality,
+                                  ))
+                              .toList(),
+                        ))
+                    .toList(),
+              ))
+          .toList();
+      return ServiceMovieDetailsModel(
+        service: SupportedService.custom,
+        url: url,
+        title: media.title,
+        description: media.description,
+        imageUrl: media.posterUrl,
+        isSeries: true,
+        seasons: seasons,
+      );
+    }
+
+    final src = extra.findById(kindOrId);
+    final baseUrl = src?.baseUrl ?? Uri.tryParse(targetUrl)?.origin ?? '';
+
+    if (src?.type == ExtraSourceType.wordpress &&
+        targetUrl.contains('/wp-json/wp/v2/posts/')) {
       final resp = await _dio.get(
-        targetUrl,
-        queryParameters: {'_embed': 1},
+        '$targetUrl?_embed=1',
         options: Options(headers: {'Referer': '$baseUrl/'}),
       );
-      final data = resp.data as Map;
-      final rawTitle = (data['title']?['rendered'] ?? '').toString();
-      final title = BajeczkiMovieRepository.cleanDisplayTitle(rawTitle);
-      final lang = BajeczkiMovieRepository.extractLanguageFromTitle(rawTitle);
-      final content = (data['content']?['rendered'] ?? '').toString();
-      final links = BajeczkiMovieRepository.extractEmbedLinks(
-        content,
-        lang: lang,
-      );
-      final desc = BajeczkiMovieRepository.decodeHtmlText(
-          (data['excerpt']?['rendered'] ?? '').toString());
-      final poster = BajeczkiMovieRepository.extractFeaturedPoster(data);
+      if (resp.data is! Map) {
+        throw Exception('Błąd pobierania danych wpisu');
+      }
+      final post = resp.data as Map;
+      final title = BajeczkiMovieRepository.cleanDisplayTitle(
+          (post['title']?['rendered'] ?? '').toString());
+      final content = (post['content']?['rendered'] ?? '').toString();
+      final desc = html
+          .parse(post['excerpt']?['rendered']?.toString() ?? content)
+          .body!
+          .text
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      final poster = BajeczkiMovieRepository.extractFeaturedPoster(post);
+      final links = BajeczkiMovieRepository.extractEmbedLinks(content);
       return ServiceMovieDetailsModel(
         service: SupportedService.custom,
         url: url,
@@ -296,7 +372,6 @@ class CustomMovieRepository implements MovieRepository {
     );
     final body = resp.data ?? '';
     final doc = html.parse(body);
-
     var title = doc
             .querySelector('meta[property="og:title"]')
             ?.attributes['content'] ??
@@ -304,7 +379,6 @@ class CustomMovieRepository implements MovieRepository {
         doc.querySelector('title')?.text ??
         'Wideo';
     title = title.replaceAll(RegExp(r'\s+'), ' ').trim();
-
     final desc = doc
             .querySelector('meta[property="og:description"]')
             ?.attributes['content'] ??
@@ -374,6 +448,35 @@ class CustomMovieRepository implements MovieRepository {
   @override
   Future<EpisodeModel> getEpisodeHosts(EpisodeModel episode) async {
     if (episode.videoUrls != null && episode.videoUrls!.isNotEmpty) {
+      return episode;
+    }
+    if (episode.url.startsWith('custom://episode|')) {
+      final parts = episode.url.split('|');
+      if (parts.length >= 4) {
+        final mediaId = parts[1];
+        final seasonNum = int.tryParse(parts[2]) ?? 1;
+        final epNum = int.tryParse(parts[3]) ?? 1;
+        final media = getIt<ExtraSourcesService>().findMediaById(mediaId);
+        if (media != null) {
+          for (final s in media.seasons) {
+            if (s.number == seasonNum) {
+              for (final e in s.episodes) {
+                if (e.number == epNum) {
+                  return episode.copyWith(
+                    videoUrls: e.links
+                        .map((l) => HostLink(
+                              url: l.url,
+                              lang: l.lang,
+                              quality: l.quality,
+                            ))
+                        .toList(),
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
       return episode;
     }
     final parsed = parseCustomUrl(episode.url);

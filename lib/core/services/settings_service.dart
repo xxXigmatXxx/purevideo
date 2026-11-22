@@ -15,6 +15,8 @@ class SettingsService {
   static const String _extraSourcesEnabledKey = 'extraSourcesEnabled';
   static const String _remoteSourcesKey = 'remoteExtraSourcesJson';
   static const String _localSourcesKey = 'localExtraSourcesJson';
+  static const String _remoteMediaKey = 'remoteExtraMediaJson';
+  static const String _localMediaKey = 'localExtraMediaJson';
   static const String _extraSourcesVersionKey = 'extraSourcesVersion';
   static const String _linklessUrlsKey = 'linklessUrlsJson_v1';
   static const String _verifiedUrlsKey = 'verifiedUrlsJson_v1';
@@ -262,6 +264,40 @@ class SettingsService {
 
   void setLocalSourcesMaps(List<Map<String, dynamic>> list) {
     box.put(_localSourcesKey, jsonEncode(list));
+  }
+
+  List<Map<String, dynamic>> getRemoteMediaMaps() {
+    try {
+      final raw = box.get(_remoteMediaKey) as String?;
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void setRemoteMediaMaps(List<Map<String, dynamic>> list) {
+    box.put(_remoteMediaKey, jsonEncode(list));
+  }
+
+  List<Map<String, dynamic>> getLocalMediaMaps() {
+    try {
+      final raw = box.get(_localMediaKey) as String?;
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void setLocalMediaMaps(List<Map<String, dynamic>> list) {
+    box.put(_localMediaKey, jsonEncode(list));
   }
 
   bool get isDeveloperMode =>

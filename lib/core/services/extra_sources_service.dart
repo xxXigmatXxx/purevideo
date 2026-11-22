@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pointycastle/digests/sha256.dart';
@@ -83,6 +84,216 @@ class ExtraSourceConfig {
       };
 }
 
+class ExtraMediaLink {
+  final String url;
+  final String lang;
+  final String quality;
+
+  const ExtraMediaLink({
+    required this.url,
+    this.lang = 'Lektor PL',
+    this.quality = 'HD',
+  });
+
+  String get hostBadge {
+    final lower = url.toLowerCase();
+    if (lower.contains('vider.info') || lower.contains('vider.pl')) {
+      return 'Vider.info';
+    }
+    if (lower.contains('cda.pl')) {
+      return 'CDA';
+    }
+    return Uri.tryParse(url)?.host ?? 'Link';
+  }
+
+  factory ExtraMediaLink.fromMap(Map<String, dynamic> map) {
+    return ExtraMediaLink(
+      url: (map['url'] ?? '').toString().trim(),
+      lang: (map['lang'] ?? 'PL').toString().trim(),
+      quality: (map['quality'] ?? 'HD').toString().trim(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'url': url,
+        'lang': lang,
+        'quality': quality,
+      };
+}
+
+class ExtraEpisodeEntry {
+  final int number;
+  final String title;
+  final List<ExtraMediaLink> links;
+
+  const ExtraEpisodeEntry({
+    required this.number,
+    this.title = '',
+    required this.links,
+  });
+
+  factory ExtraEpisodeEntry.fromMap(Map<String, dynamic> map) {
+    final rawLinks = (map['links'] as List?) ?? const [];
+    return ExtraEpisodeEntry(
+      number: (map['number'] as num?)?.toInt() ?? 1,
+      title: (map['title'] ?? '').toString().trim(),
+      links: rawLinks
+          .whereType<Map>()
+          .map((e) => ExtraMediaLink.fromMap(Map<String, dynamic>.from(e)))
+          .where((l) => l.url.startsWith('http'))
+          .toList(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'number': number,
+        'title': title,
+        'links': links.map((l) => l.toMap()).toList(),
+      };
+}
+
+class ExtraSeasonEntry {
+  final int number;
+  final List<ExtraEpisodeEntry> episodes;
+
+  const ExtraSeasonEntry({
+    required this.number,
+    required this.episodes,
+  });
+
+  factory ExtraSeasonEntry.fromMap(Map<String, dynamic> map) {
+    final rawEps = (map['episodes'] as List?) ?? const [];
+    final eps = rawEps
+        .whereType<Map>()
+        .map((e) => ExtraEpisodeEntry.fromMap(Map<String, dynamic>.from(e)))
+        .toList()
+      ..sort((a, b) => a.number.compareTo(b.number));
+    return ExtraSeasonEntry(
+      number: (map['number'] as num?)?.toInt() ?? 1,
+      episodes: eps,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'number': number,
+        'episodes': episodes.map((e) => e.toMap()).toList(),
+      };
+}
+
+class ExtraMediaEntry {
+  final String id;
+  final String title;
+  final String posterUrl;
+  final String description;
+  final String category;
+  final bool isSeries;
+  final List<ExtraMediaLink> links;
+  final List<ExtraSeasonEntry> seasons;
+  final bool isRemote;
+
+  const ExtraMediaEntry({
+    required this.id,
+    required this.title,
+    this.posterUrl = '',
+    this.description = '',
+    this.category = '',
+    required this.isSeries,
+    this.links = const [],
+    this.seasons = const [],
+    this.isRemote = false,
+  });
+
+  factory ExtraMediaEntry.fromMap(Map<String, dynamic> map,
+      {bool isRemote = false}) {
+    final isSeries = map['isSeries'] == true;
+    final rawLinks = (map['links'] as List?) ?? const [];
+    final rawSeasons = (map['seasons'] as List?) ?? const [];
+    final seasons = rawSeasons
+        .whereType<Map>()
+        .map((e) => ExtraSeasonEntry.fromMap(Map<String, dynamic>.from(e)))
+        .toList()
+      ..sort((a, b) => a.number.compareTo(b.number));
+    return ExtraMediaEntry(
+      id: (map['id'] ?? '').toString().trim(),
+      title: (map['title'] ?? '').toString().trim(),
+      posterUrl: (map['posterUrl'] ?? '').toString().trim(),
+      description: (map['description'] ?? '').toString().trim(),
+      category: (map['category'] ?? '').toString().trim(),
+      isSeries: isSeries,
+      links: rawLinks
+          .whereType<Map>()
+          .map((e) => ExtraMediaLink.fromMap(Map<String, dynamic>.from(e)))
+          .where((l) => l.url.startsWith('http'))
+          .toList(),
+      seasons: seasons,
+      isRemote: isRemote,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'title': title,
+        'posterUrl': posterUrl,
+        'description': description,
+        'category': category,
+        'isSeries': isSeries,
+        if (!isSeries) 'links': links.map((l) => l.toMap()).toList(),
+        if (isSeries) 'seasons': seasons.map((s) => s.toMap()).toList(),
+      };
+
+  ExtraMediaEntry mergeSeriesEpisode({
+    required int seasonNumber,
+    required int episodeNumber,
+    required String episodeTitle,
+    required List<ExtraMediaLink> newLinks,
+  }) {
+    final seasonMap = <int, List<ExtraEpisodeEntry>>{};
+    for (final s in seasons) {
+      seasonMap[s.number] = List<ExtraEpisodeEntry>.from(s.episodes);
+    }
+    final epList = seasonMap[seasonNumber] ?? <ExtraEpisodeEntry>[];
+    final existingIdx = epList.indexWhere((e) => e.number == episodeNumber);
+    if (existingIdx >= 0) {
+      final existing = epList[existingIdx];
+      final combined = <ExtraMediaLink>[...existing.links];
+      for (final nl in newLinks) {
+        if (!combined.any((c) => c.url == nl.url)) {
+          combined.add(nl);
+        }
+      }
+      epList[existingIdx] = ExtraEpisodeEntry(
+        number: episodeNumber,
+        title: episodeTitle.trim().isNotEmpty ? episodeTitle.trim() : existing.title,
+        links: combined,
+      );
+    } else {
+      epList.add(ExtraEpisodeEntry(
+        number: episodeNumber,
+        title: episodeTitle.trim().isNotEmpty
+            ? episodeTitle.trim()
+            : 'Odcinek $episodeNumber',
+        links: newLinks,
+      ));
+    }
+    epList.sort((a, b) => a.number.compareTo(b.number));
+    seasonMap[seasonNumber] = epList;
+    final sortedSeasons = seasonMap.entries
+        .map((e) => ExtraSeasonEntry(number: e.key, episodes: e.value))
+        .toList()
+      ..sort((a, b) => a.number.compareTo(b.number));
+    return ExtraMediaEntry(
+      id: id,
+      title: title,
+      posterUrl: posterUrl,
+      description: description,
+      category: category,
+      isSeries: true,
+      seasons: sortedSeasons,
+      isRemote: isRemote,
+    );
+  }
+}
+
 class ExtraSourcesService {
   static const String repoOwner = 'xxXigmatXxx';
   static const String repoName = 'purevideo';
@@ -112,29 +323,28 @@ class ExtraSourcesService {
 
   void notifyChanged() {
     _settings.bumpExtraSourcesVersion();
-    if (!_changesController.isClosed) {
-      _changesController.add(null);
-    }
+    _changesController.add(null);
   }
 
   static String _sha256Hex(String input) {
-    final digest = SHA256Digest();
-    final bytes = Uint8List.fromList(utf8.encode(input));
-    final out = digest.process(bytes);
-    return out.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final digest = SHA256Digest().process(Uint8List.fromList(utf8.encode(input)));
+    return digest.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
   Future<bool> hasVerifiedOwnerCredentials() async {
-    final token = await SecureStorageService.getData(_ownerTokenKey);
-    final pinHash = await SecureStorageService.getData(_ownerPinHashKey);
-    return token != null &&
-        token.trim().isNotEmpty &&
-        pinHash != null &&
-        pinHash.trim().isNotEmpty;
+    final tok = await SecureStorageService.getData(_ownerTokenKey);
+    final pin = await SecureStorageService.getData(_ownerPinHashKey);
+    return tok != null && tok.isNotEmpty && pin != null && pin.isNotEmpty;
   }
 
   Future<String?> getVerifiedOwnerLogin() async {
     return SecureStorageService.getData(_ownerLoginKey);
+  }
+
+  Future<bool> verifyPin(String pin) async {
+    final savedHash = await SecureStorageService.getData(_ownerPinHashKey);
+    if (savedHash == null || savedHash.isEmpty) return false;
+    return savedHash == _sha256Hex('pv:${pin.trim()}');
   }
 
   Future<void> clearOwnerVerification() async {
@@ -143,53 +353,33 @@ class ExtraSourcesService {
     await SecureStorageService.deleteData(_ownerLoginKey);
   }
 
-  Future<bool> verifyPin(String pin) async {
-    final savedHash = await SecureStorageService.getData(_ownerPinHashKey);
-    if (savedHash == null || savedHash.isEmpty) return false;
-    return _sha256Hex('pv:$pin') == savedHash;
-  }
-
-  /// Verifies that the supplied GitHub token actually belongs to [repoOwner]
-  /// (or has push permissions to [repoOwner]/[repoName]) and saves it in
-  /// Android Keystore protected by a local PIN hash.
   Future<String?> verifyAndSaveOwnerCredentials({
     required String githubToken,
     required String pin,
   }) async {
     final cleanToken = githubToken.trim();
     final cleanPin = pin.trim();
-    if (cleanToken.length < 10) {
-      return 'Wprowadź poprawny token GitHub (PAT).';
-    }
+    if (cleanToken.isEmpty) return 'Wprowadź token GitHub (PAT).';
     if (cleanPin.length < 4 || cleanPin.length > 8) {
       return 'PIN powinien mieć od 4 do 8 znaków.';
     }
-
     try {
       final authHeaders = {
         'Authorization': 'Bearer $cleanToken',
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       };
-
       final userResp = await _dio.get(
         'https://api.github.com/user',
-        options: Options(
-          headers: authHeaders,
-          validateStatus: (_) => true,
-        ),
+        options: Options(headers: authHeaders, validateStatus: (_) => true),
       );
       if (userResp.statusCode != 200 || userResp.data is! Map) {
         return 'Nieprawidłowy token GitHub (HTTP ${userResp.statusCode}).';
       }
       final login = (userResp.data['login'] ?? '').toString().trim();
-
       final repoResp = await _dio.get(
         'https://api.github.com/repos/$repoOwner/$repoName',
-        options: Options(
-          headers: authHeaders,
-          validateStatus: (_) => true,
-        ),
+        options: Options(headers: authHeaders, validateStatus: (_) => true),
       );
       if (repoResp.statusCode != 200 || repoResp.data is! Map) {
         return 'Brak dostępu do repozytorium $repoOwner/$repoName.';
@@ -199,7 +389,6 @@ class ExtraSourcesService {
       if (!canPush || login.toLowerCase() != repoOwner.toLowerCase()) {
         return 'Odmowa dostępu: konto "$login" nie jest właścicielem ($repoOwner) z prawem zapisu.';
       }
-
       await SecureStorageService.saveData(_ownerTokenKey, cleanToken);
       await SecureStorageService.saveData(
           _ownerPinHashKey, _sha256Hex('pv:$cleanPin'));
@@ -209,6 +398,8 @@ class ExtraSourcesService {
       return 'Błąd weryfikacji GitHub: $e';
     }
   }
+
+  // --- Website adapters ---
 
   List<ExtraSourceConfig> getRemoteSources() {
     return _settings
@@ -248,6 +439,91 @@ class ExtraSourcesService {
     return null;
   }
 
+  // --- Curated Movies & Series (CDA / Vider.info) ---
+
+  List<ExtraMediaEntry> getRemoteMedia() {
+    return _settings
+        .getRemoteMediaMaps()
+        .map((m) => ExtraMediaEntry.fromMap(m, isRemote: true))
+        .where((m) => m.id.isNotEmpty && m.title.isNotEmpty)
+        .toList();
+  }
+
+  List<ExtraMediaEntry> getLocalMedia() {
+    return _settings
+        .getLocalMediaMaps()
+        .map((m) => ExtraMediaEntry.fromMap(m, isRemote: false))
+        .where((m) => m.id.isNotEmpty && m.title.isNotEmpty)
+        .toList();
+  }
+
+  List<ExtraMediaEntry> getAllActiveCustomMedia() {
+    if (!_settings.extraSourcesEnabled) return const [];
+    final map = <String, ExtraMediaEntry>{};
+    for (final m in getRemoteMedia()) {
+      map[m.id] = m;
+    }
+    for (final m in getLocalMedia()) {
+      if (map.containsKey(m.id) && m.isSeries && map[m.id]!.isSeries) {
+        var combined = map[m.id]!;
+        for (final s in m.seasons) {
+          for (final ep in s.episodes) {
+            combined = combined.mergeSeriesEpisode(
+              seasonNumber: s.number,
+              episodeNumber: ep.number,
+              episodeTitle: ep.title,
+              newLinks: ep.links,
+            );
+          }
+        }
+        map[m.id] = combined;
+      } else {
+        map[m.id] = m;
+      }
+    }
+    return map.values.toList();
+  }
+
+  ExtraMediaEntry? findMediaById(String id) {
+    for (final m in getAllActiveCustomMedia()) {
+      if (m.id == id) return m;
+    }
+    for (final m in getLocalMedia()) {
+      if (m.id == id) return m;
+    }
+    for (final m in getRemoteMedia()) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  static String? validateVideoLinkUrl(String rawUrl) {
+    final u = rawUrl.trim();
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+      return 'Link musi zaczynać się od http:// lub https://';
+    }
+    final lower = u.toLowerCase();
+    final isCda = lower.contains('cda.pl');
+    final isVider = lower.contains('vider.info') || lower.contains('vider.pl');
+    if (!isCda && !isVider) {
+      return 'Obsługiwane są obecnie linki z cda.pl oraz vider.info.';
+    }
+    return null;
+  }
+
+  Future<void> addOrUpdateLocalMedia(ExtraMediaEntry entry) async {
+    final current = getLocalMedia().where((m) => m.id != entry.id).toList();
+    current.add(entry);
+    _settings.setLocalMediaMaps(current.map((e) => e.toMap()).toList());
+    notifyChanged();
+  }
+
+  Future<void> removeLocalMedia(String id) async {
+    final current = getLocalMedia().where((m) => m.id != id).toList();
+    _settings.setLocalMediaMaps(current.map((e) => e.toMap()).toList());
+    notifyChanged();
+  }
+
   Future<bool> syncRemoteSources({bool force = false}) async {
     if (_hasSyncedOnce && !force) return true;
     try {
@@ -262,12 +538,21 @@ class ExtraSourcesService {
           resp.data != null &&
           resp.data!.trim().isNotEmpty) {
         final decoded = jsonDecode(resp.data!);
-        if (decoded is Map && decoded['sources'] is List) {
-          final list = (decoded['sources'] as List)
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-          _settings.setRemoteSourcesMaps(list);
+        if (decoded is Map) {
+          final sourcesList = (decoded['sources'] is List)
+              ? (decoded['sources'] as List)
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList()
+              : <Map<String, dynamic>>[];
+          final mediaList = (decoded['media'] is List)
+              ? (decoded['media'] as List)
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList()
+              : <Map<String, dynamic>>[];
+          _settings.setRemoteSourcesMaps(sourcesList);
+          _settings.setRemoteMediaMaps(mediaList);
           _hasSyncedOnce = true;
           if (force) notifyChanged();
           return true;
@@ -293,7 +578,7 @@ class ExtraSourcesService {
   }
 
   Future<String?> validateSourceUrl(String rawUrl) async {
-    var url = rawUrl.trim();
+    final url = rawUrl.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       return 'Adres musi zaczynać się od http:// lub https://';
     }
@@ -317,12 +602,13 @@ class ExtraSourcesService {
     }
   }
 
-  /// Publishes a new global source (or removes one when [removeId] is set) to
-  /// remote_sources.json on GitHub using the verified owner token stored locally.
-  Future<String?> publishGlobalSourcesChange({
-    ExtraSourceConfig? addSource,
-    String? removeId,
+  Future<String?> _updateManifestOnGitHub({
     required String pin,
+    required String commitMessage,
+    required void Function(
+      List<Map<String, dynamic>> sources,
+      List<Map<String, dynamic>> media,
+    ) mutate,
   }) async {
     if (!await verifyPin(pin)) {
       return 'Nieprawidłowy kod PIN właściciela.';
@@ -331,12 +617,6 @@ class ExtraSourcesService {
     if (token == null || token.isEmpty) {
       return 'Brak zapisanego tokenu właściciela.';
     }
-
-    if (addSource != null) {
-      final urlErr = await validateSourceUrl(addSource.baseUrl);
-      if (urlErr != null) return urlErr;
-    }
-
     try {
       final apiUrl =
           'https://api.github.com/repos/$repoOwner/$repoName/contents/$manifestPath';
@@ -348,13 +628,13 @@ class ExtraSourcesService {
 
       String? fileSha;
       int version = 1;
-      final existingList = <Map<String, dynamic>>[];
+      final sourcesList = <Map<String, dynamic>>[];
+      final mediaList = <Map<String, dynamic>>[];
 
       final getResp = await _dio.get(
         '$apiUrl?ref=$repoBranch',
         options: Options(headers: authHeaders, validateStatus: (_) => true),
       );
-
       if (getResp.statusCode == 200 && getResp.data is Map) {
         fileSha = getResp.data['sha']?.toString();
         final b64 = (getResp.data['content'] ?? '')
@@ -367,7 +647,12 @@ class ExtraSourcesService {
             version = ((parsed['version'] as num?)?.toInt() ?? 0) + 1;
             if (parsed['sources'] is List) {
               for (final item in (parsed['sources'] as List).whereType<Map>()) {
-                existingList.add(Map<String, dynamic>.from(item));
+                sourcesList.add(Map<String, dynamic>.from(item));
+              }
+            }
+            if (parsed['media'] is List) {
+              for (final item in (parsed['media'] as List).whereType<Map>()) {
+                mediaList.add(Map<String, dynamic>.from(item));
               }
             }
           }
@@ -376,35 +661,25 @@ class ExtraSourcesService {
         return 'Błąd odczytu manifestu z GitHub (HTTP ${getResp.statusCode}).';
       }
 
-      if (removeId != null) {
-        existingList.removeWhere((e) => e['id']?.toString() == removeId);
-      }
-      if (addSource != null) {
-        existingList.removeWhere((e) =>
-            e['id']?.toString() == addSource.id ||
-            e['baseUrl']?.toString() == addSource.baseUrl);
-        existingList.add(addSource.toMap());
-      }
+      mutate(sourcesList, mediaList);
 
       final newJson = const JsonEncoder.withIndent('  ').convert({
         'version': version,
         'updatedAt': DateTime.now().toUtc().toIso8601String(),
-        'sources': existingList,
+        'sources': sourcesList,
+        'media': mediaList,
       });
 
       final putResp = await _dio.put(
         apiUrl,
         data: jsonEncode({
-          'message': addSource != null
-              ? 'Update remote_sources.json: add ${addSource.name}'
-              : 'Update remote_sources.json: remove $removeId',
+          'message': commitMessage,
           'content': base64Encode(utf8.encode('$newJson\n')),
           'branch': repoBranch,
           if (fileSha != null) 'sha': fileSha,
         }),
         options: Options(headers: authHeaders, validateStatus: (_) => true),
       );
-
       if (putResp.statusCode != 200 && putResp.statusCode != 201) {
         final msg = (putResp.data is Map)
             ? (putResp.data['message'] ?? '').toString()
@@ -412,12 +687,86 @@ class ExtraSourcesService {
         return 'Błąd zapisu na GitHub (HTTP ${putResp.statusCode}): $msg';
       }
 
-      _settings.setRemoteSourcesMaps(existingList);
+      _settings.setRemoteSourcesMaps(sourcesList);
+      _settings.setRemoteMediaMaps(mediaList);
       _hasSyncedOnce = true;
       notifyChanged();
       return null;
     } catch (e) {
-      return 'Błąd publikacji globalnego źródła: $e';
+      return 'Błąd publikacji na GitHub: $e';
     }
+  }
+
+  Future<String?> publishGlobalSourcesChange({
+    ExtraSourceConfig? addSource,
+    String? removeId,
+    required String pin,
+  }) async {
+    if (addSource != null) {
+      final urlErr = await validateSourceUrl(addSource.baseUrl);
+      if (urlErr != null) return urlErr;
+    }
+    return _updateManifestOnGitHub(
+      pin: pin,
+      commitMessage: addSource != null
+          ? 'Update remote_sources.json: add source ${addSource.name}'
+          : 'Update remote_sources.json: remove source $removeId',
+      mutate: (sourcesList, _) {
+        if (removeId != null) {
+          sourcesList.removeWhere((e) => e['id']?.toString() == removeId);
+        }
+        if (addSource != null) {
+          sourcesList.removeWhere((e) =>
+              e['id']?.toString() == addSource.id ||
+              e['baseUrl']?.toString() == addSource.baseUrl);
+          sourcesList.add(addSource.toMap());
+        }
+      },
+    );
+  }
+
+  Future<String?> publishGlobalMediaChange({
+    ExtraMediaEntry? upsertMedia,
+    String? removeMediaId,
+    required String pin,
+  }) async {
+    return _updateManifestOnGitHub(
+      pin: pin,
+      commitMessage: upsertMedia != null
+          ? 'Update remote_sources.json: ${upsertMedia.isSeries ? "series" : "movie"} ${upsertMedia.title}'
+          : 'Update remote_sources.json: remove media $removeMediaId',
+      mutate: (_, mediaList) {
+        if (removeMediaId != null) {
+          mediaList.removeWhere((e) => e['id']?.toString() == removeMediaId);
+        }
+        if (upsertMedia != null) {
+          final existingIdx = mediaList.indexWhere((e) =>
+              e['id']?.toString() == upsertMedia.id ||
+              (upsertMedia.isSeries &&
+                  e['isSeries'] == true &&
+                  (e['title'] ?? '').toString().toLowerCase().trim() ==
+                      upsertMedia.title.toLowerCase().trim()));
+          if (existingIdx >= 0 && upsertMedia.isSeries) {
+            var base = ExtraMediaEntry.fromMap(mediaList[existingIdx], isRemote: true);
+            for (final s in upsertMedia.seasons) {
+              for (final ep in s.episodes) {
+                base = base.mergeSeriesEpisode(
+                  seasonNumber: s.number,
+                  episodeNumber: ep.number,
+                  episodeTitle: ep.title,
+                  newLinks: ep.links,
+                );
+              }
+            }
+            mediaList[existingIdx] = base.toMap();
+          } else {
+            if (existingIdx >= 0) {
+              mediaList.removeAt(existingIdx);
+            }
+            mediaList.add(upsertMedia.toMap());
+          }
+        }
+      },
+    );
   }
 }

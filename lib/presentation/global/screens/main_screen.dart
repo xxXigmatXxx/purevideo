@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
+import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
 import 'package:purevideo/di/injection_container.dart';
 
@@ -14,6 +16,61 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  bool _dismissedBanner = false;
+
+  Widget _buildUpdateBanner(BuildContext context) {
+    return ValueListenableBuilder<AppUpdateInfo?>(
+      valueListenable: getIt<AppUpdateService>().availableUpdate,
+      builder: (context, update, _) {
+        if (update == null || _dismissedBanner) {
+          return const SizedBox.shrink();
+        }
+        final isDev = update.channel == AppUpdateChannel.dev;
+        return Material(
+          color: isDev ? const Color(0xFF4A3800) : const Color(0xFFB71C1C),
+          child: SafeArea(
+            bottom: false,
+            child: InkWell(
+              onTap: () => AppUpdateDialog.show(context, update),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.system_update,
+                      color: isDev ? Colors.amberAccent : Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Dostępna nowa wersja: ${update.name} (v${update.version}) • Kliknij aby pobrać',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close,
+                          color: Colors.white70, size: 18),
+                      onPressed: () => setState(() => _dismissedBanner = true),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -63,12 +120,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     currentIndex: currentIndex,
                     onTap: _onSelectBranch,
                   ),
-                  Expanded(child: widget.navigationShell),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        _buildUpdateBanner(context),
+                        Expanded(child: widget.navigationShell),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             )
           : Scaffold(
-              body: widget.navigationShell,
+              body: Column(
+                children: [
+                  _buildUpdateBanner(context),
+                  Expanded(child: widget.navigationShell),
+                ],
+              ),
               bottomNavigationBar: _CustomBottomNavigationBar(
                 currentIndex: currentIndex,
                 onTap: _onSelectBranch,

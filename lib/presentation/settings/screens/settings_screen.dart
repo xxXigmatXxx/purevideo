@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/extra_sources_service.dart';
+import 'package:purevideo/core/services/app_update_service.dart';
+import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_item.dart';
@@ -45,8 +47,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.extension_outlined,
                     title: 'Źródła dodatkowe',
                     subtitle: _settingsService.extraSourcesEnabled
-                        ? 'Włączone • kliknij aby zarządzać i synchronizować'
-                        : 'Wyłączone • włącz aby dodać nowe serwisy',
+                        ? 'Włączone • dodane filmy, seriale (CDA / Vider.info) i panel admina'
+                        : 'Wyłączone • włącz aby zobaczyć dodane filmy i seriale',
                     onTap: () => context.pushNamed('extra_sources'),
                     trailing: Switch(
                       value: _settingsService.extraSourcesEnabled,
@@ -73,6 +75,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'Styl interfejsu (Netflix / Oryginalny) oraz ikona i nazwa aplikacji',
                 onTap: () {
                   context.pushNamed('theme');
+                },
+              ),
+              SettingsItem(
+                icon: Icons.system_update_alt,
+                title: 'Aktualizacje',
+                subtitle: getIt<AppUpdateService>().availableUpdate.value != null
+                    ? 'Dostępna nowa wersja: v${getIt<AppUpdateService>().availableUpdate.value!.version}'
+                    : 'Sprawdź dostępność nowej wersji aplikacji',
+                onTap: () async {
+                  final upd =
+                      await getIt<AppUpdateService>().checkForUpdates(force: true);
+                  if (!context.mounted) return;
+                  if (upd != null) {
+                    await AppUpdateDialog.show(context, upd);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Masz już najnowszą wersję aplikacji.'),
+                      ),
+                    );
+                  }
                 },
               ),
               SettingsItem(
