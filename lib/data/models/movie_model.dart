@@ -1,4 +1,6 @@
 import 'package:hive_flutter/adapters.dart';
+import 'package:purevideo/core/services/poster_cache_service.dart';
+import 'package:purevideo/core/services/webview_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/data/models/filmweb_model.dart';
 import 'package:purevideo/data/models/link_model.dart';
@@ -41,14 +43,21 @@ class MovieModel {
 
   static String normalizePosterUrl(String raw) {
     var u = raw.trim();
-    if (u.isEmpty) return '';
+    if (u.isEmpty || u.startsWith('data:')) return '';
     if (u.startsWith('//')) u = 'https:$u';
-    if (u.startsWith('http://image.tmdb.org') ||
-        u.startsWith('http://ekino.ws') ||
-        u.startsWith('http://www.obejrzyj.to') ||
-        u.startsWith('http://obejrzyj.to') ||
-        u.startsWith('http://filman.cc')) {
-      u = u.replaceFirst('http://', 'https://');
+    if (u.startsWith('http://')) {
+      final lower = u.toLowerCase();
+      if (lower.contains('tmdb.org') ||
+          lower.contains('ekino.ws') ||
+          lower.contains('obejrzyj.to') ||
+          lower.contains('filman.cc') ||
+          lower.contains('docchi.pl') ||
+          lower.contains('bajeczki.org') ||
+          lower.contains('myanimelist.net') ||
+          lower.contains('anilist.co') ||
+          lower.contains('fwcdn.pl')) {
+        u = u.replaceFirst('http://', 'https://');
+      }
     }
     if (u.contains('image.tmdb.org/t/p/original/')) {
       u = u.replaceFirst(
@@ -60,8 +69,7 @@ class MovieModel {
   static Map<String, String> buildImageHeaders(
       SupportedService service, String url) {
     final headers = <String, String>{
-      'User-Agent':
-          'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+      'User-Agent': WebViewService.cleanUserAgent,
     };
     final lower = url.toLowerCase();
     final needsServiceCookies =
@@ -89,19 +97,27 @@ class MovieModel {
     return headers;
   }
 
-  ServiceMovieModel get _bestPosterService {
-    for (final s in services) {
-      if (s.imageUrl.contains('tmdb.org') && s.imageUrl.trim().isNotEmpty) {
-        return s;
-      }
-    }
-    for (final s in services) {
-      if (s.imageUrl.trim().startsWith('http')) {
-        return s;
-      }
-    }
-    return services.first;
+  static int _posterServicePriority(ServiceMovieModel s) {
+    final u = s.imageUrl.trim().toLowerCase();
+    if (u.isEmpty || !u.startsWith('http')) return 99;
+    if (u.contains('tmdb.org')) return 0;
+    if (s.service == SupportedService.obejrzyjto) return 1;
+    if (s.service == SupportedService.docchi) return 2;
+    if (s.service == SupportedService.ekino) return 3;
+    if (s.service == SupportedService.custom) return 4;
+    if (s.service == SupportedService.bajeczki) return 5;
+    if (s.service == SupportedService.filman) return 6;
+    return 7;
   }
+
+  List<ServiceMovieModel> get _rankedPosterServices {
+    final list = List<ServiceMovieModel>.from(services);
+    list.sort((a, b) =>
+        _posterServicePriority(a).compareTo(_posterServicePriority(b)));
+    return list;
+  }
+
+  ServiceMovieModel get _bestPosterService => _rankedPosterServices.first;
 
   String get title => services.first.title;
 
@@ -110,6 +126,23 @@ class MovieModel {
   Map<String, String> get imageHeaders {
     final best = _bestPosterService;
     return buildImageHeaders(best.service, normalizePosterUrl(best.imageUrl));
+  }
+
+  List<PosterCandidate> get fallbackPosterCandidates {
+    final ranked = _rankedPosterServices;
+    if (ranked.length <= 1) return const [];
+    final primaryUrl = imageUrl;
+    final out = <PosterCandidate>[];
+    for (final s in ranked.skip(1)) {
+      final norm = normalizePosterUrl(s.imageUrl);
+      if (norm.isNotEmpty && norm != primaryUrl) {
+        out.add(PosterCandidate(
+          url: norm,
+          headers: buildImageHeaders(s.service, norm),
+        ));
+      }
+    }
+    return out;
   }
 
   const MovieModel({
@@ -268,13 +301,33 @@ class MovieDetailsModel {
 
   Map<String, String> get imageHeaders {
     final u = imageUrl;
-    if (filmwebInfo?.posterUrl != null) {
-      return const {
-        'User-Agent':
-            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+    if (filmwebInfo?.posterUrl != null &&
+        filmwebInfo!.posterUrl!.trim().isNotEmpty) {
+      return {
+        'User-Agent': WebViewService.cleanUserAgent,
       };
     }
+    for (final s in services) {
+      if (MovieModel.normalizePosterUrl(s.imageUrl) == u) {
+        return MovieModel.buildImageHeaders(s.service, u);
+      }
+    }
     return MovieModel.buildImageHeaders(services.first.service, u);
+  }
+
+  List<PosterCandidate> get fallbackPosterCandidates {
+    final primary = imageUrl;
+    final out = <PosterCandidate>[];
+    for (final s in services) {
+      final norm = MovieModel.normalizePosterUrl(s.imageUrl);
+      if (norm.isNotEmpty && norm != primary) {
+        out.add(PosterCandidate(
+          url: norm,
+          headers: MovieModel.buildImageHeaders(s.service, norm),
+        ));
+      }
+    }
+    return out;
   }
 
   List<HostLink>? get videoUrls =>

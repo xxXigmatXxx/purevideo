@@ -52,6 +52,7 @@ class SearchMovieTile extends StatelessWidget {
             PosterImage(
               url: movie.imageUrl,
               headers: movie.imageHeaders,
+              fallbacks: movie.fallbackPosterCandidates,
               title: movie.title,
             ),
             Positioned(

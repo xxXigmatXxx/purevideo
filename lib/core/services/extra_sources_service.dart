@@ -318,6 +318,21 @@ class ExtraSourcesService {
   final SettingsService _settings = getIt<SettingsService>();
   final _changesController = StreamController<void>.broadcast();
   bool _hasSyncedOnce = false;
+  bool _adminSessionUnlocked = false;
+  String? _sessionUnlockedPin;
+
+  bool get isAdminSessionUnlocked => _adminSessionUnlocked;
+  String? get sessionUnlockedPin => _sessionUnlockedPin;
+
+  void unlockAdminSession(String pin) {
+    _adminSessionUnlocked = true;
+    _sessionUnlockedPin = pin.trim();
+  }
+
+  void lockAdminSession() {
+    _adminSessionUnlocked = false;
+    _sessionUnlockedPin = null;
+  }
 
   Stream<void> get changesStream => _changesController.stream;
 
@@ -348,6 +363,7 @@ class ExtraSourcesService {
   }
 
   Future<void> clearOwnerVerification() async {
+    lockAdminSession();
     await SecureStorageService.deleteData(_ownerTokenKey);
     await SecureStorageService.deleteData(_ownerPinHashKey);
     await SecureStorageService.deleteData(_ownerLoginKey);

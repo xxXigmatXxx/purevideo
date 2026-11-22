@@ -1,15 +1,14 @@
-import 'package:fast_cached_network_image/fast_cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
-import 'package:purevideo/data/repositories/auth_repository.dart';
-import 'package:purevideo/di/injection_container.dart';
+import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_bloc.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_event.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_state.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
+import 'package:purevideo/presentation/global/widgets/poster_image.dart';
 import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
-import 'package:go_router/go_router.dart';
 
 class AccountsScreen extends StatelessWidget {
   const AccountsScreen({super.key});
@@ -22,12 +21,34 @@ class AccountsScreen extends StatelessWidget {
     SupportedService.bajeczki,
   ];
 
+  Widget _buildServiceLogo(SupportedService service) {
+    return SizedBox(
+      width: 40,
+      height: 32,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: PosterImage(
+          url: service.image,
+          headers: MovieModel.buildImageHeaders(service, service.image),
+          title: service.displayName,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          decodeWidth: 160,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Konta')),
       body: BlocBuilder<AccountsBloc, AccountsState>(
         builder: (context, state) {
+          final visibleAccounts = Map.fromEntries(
+            state.accounts.entries.where((e) => !e.key.isExtraSource),
+          );
+
           return SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -40,43 +61,47 @@ class AccountsScreen extends StatelessWidget {
                     itemCount: _activeServices.length,
                     itemBuilder: (context, index) {
                       final service = _activeServices[index];
-                      final isLoggedIn = state.accounts.containsKey(service);
-
+                      final isLoggedIn = visibleAccounts.containsKey(service);
                       if (isLoggedIn) {
                         return const SizedBox.shrink();
                       }
-
+                      final isPasswordless =
+                          service.loginRequiredFields.isEmpty;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: TvFocusable(
                           borderRadius: BorderRadius.circular(12),
                           focusScale: 1.01,
-                          onTap: () => context.pushNamed(
-                            'login',
-                            pathParameters: {'service': service.name},
-                          ),
+                          onTap: () {
+                            if (isPasswordless) {
+                              context.read<AccountsBloc>().add(
+                                    SignInRequested(
+                                      service: service,
+                                      fields: const {'anonymous': 'true'},
+                                    ),
+                                  );
+                            } else {
+                              context.pushNamed(
+                                'login',
+                                pathParameters: {'service': service.name},
+                              );
+                            }
+                          },
                           child: Card(
                             child: ListTile(
-                              leading: SizedBox(
-                                width: 32,
-                                height: 32,
-                                child: FastCachedImage(
-                                    url: service.image,
-                                    headers: {
-                                      'User-Agent':
-                                          'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-                                      'Cookie': getIt<
-                                                      Map<SupportedService,
-                                                          AuthRepository>>()[
-                                                  service]
-                                              ?.getAccount()
-                                              ?.cookies
-                                              .join('; ') ??
-                                          '',
-                                    }),
-                              ),
+                              leading: _buildServiceLogo(service),
                               title: Text(service.displayName),
-                              trailing: const Icon(Icons.login),
+                              subtitle: isPasswordless
+                                  ? const Text(
+                                      'Dostęp publiczny • dotknij aby włączyć (bez hasła)',
+                                      style: TextStyle(fontSize: 12),
+                                    )
+                                  : null,
+                              trailing: Icon(
+                                isPasswordless
+                                    ? Icons.power_settings_new
+                                    : Icons.login,
+                              ),
                             ),
                           ),
                         ),
@@ -86,7 +111,12 @@ class AccountsScreen extends StatelessWidget {
                   Builder(
                     builder: (context) {
                       if (state is AccountsLoading) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
                       }
 
                       if (state is AccountsError) {
@@ -101,51 +131,56 @@ class AccountsScreen extends StatelessWidget {
                       }
 
                       if (state is AccountsLoaded) {
-                        if (state.accounts.isEmpty) {
+                        if (visibleAccounts.isEmpty) {
                           return const Center(
-                            child: Text(
-                              'Brak kont. Dodaj konto używając przycisków powyżej.',
+                            child: Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                'Brak aktywnych kont. Dodaj lub włącz źródło powyżej.',
+                              ),
                             ),
                           );
                         }
 
                         return Column(
-                          children: state.accounts.entries.map((account) {
-                            return ListTile(
-                              leading: SizedBox(
-                                height: 32,
-                                width: 64,
-                                child: FastCachedImage(
-                                    url: account.key.image,
-                                    headers: {
-                                      'User-Agent':
-                                          'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-                                      'Cookie': getIt<
-                                                      Map<SupportedService,
-                                                          AuthRepository>>()[
-                                                  account.key]
-                                              ?.getAccount()
-                                              ?.cookies
-                                              .join('; ') ??
-                                          '',
-                                    }),
-                              ),
-                              title: Text(account.value.fields.entries
-                                  .firstWhere(
-                                      (element) =>
-                                          element.key == 'login' ||
-                                          element.key == 'email',
-                                      orElse: () =>
-                                          const MapEntry('login', 'Unknown'))
-                                  .value),
-                              subtitle: Text(account.key.displayName),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete),
-                                onPressed: () {
-                                  context.read<AccountsBloc>().add(
-                                        SignOutRequested(account.key),
-                                      );
-                                },
+                          children: visibleAccounts.entries.map((account) {
+                            final service = account.key;
+                            final isPasswordless =
+                                service.loginRequiredFields.isEmpty;
+                            final loginLabel = account.value.fields.entries
+                                .firstWhere(
+                                  (element) =>
+                                      element.key == 'login' ||
+                                      element.key == 'email',
+                                  orElse: () => MapEntry(
+                                    'login',
+                                    isPasswordless
+                                        ? 'Dostęp publiczny'
+                                        : 'Gość',
+                                  ),
+                                )
+                                .value;
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              child: ListTile(
+                                leading: _buildServiceLogo(service),
+                                title: Text(loginLabel),
+                                subtitle: Text(service.displayName),
+                                trailing: IconButton(
+                                  icon: Icon(
+                                    isPasswordless
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.delete,
+                                  ),
+                                  tooltip: isPasswordless
+                                      ? 'Wyłącz źródło'
+                                      : 'Wyloguj',
+                                  onPressed: () {
+                                    context.read<AccountsBloc>().add(
+                                          SignOutRequested(service),
+                                        );
+                                  },
+                                ),
                               ),
                             );
                           }).toList(),
@@ -156,7 +191,7 @@ class AccountsScreen extends StatelessWidget {
                         child: Text('Nieoczekiwany błąd. Spróbuj ponownie.'),
                       );
                     },
-                  )
+                  ),
                 ],
               ),
             ),

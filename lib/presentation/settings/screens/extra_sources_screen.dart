@@ -1,4 +1,5 @@
-import 'package:fast_cached_network_image/fast_cached_network_image.dart';
+import 'package:purevideo/presentation/global/widgets/poster_image.dart';
+import 'package:purevideo/presentation/settings/widgets/owner_auth_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:purevideo/core/services/app_update_service.dart';
@@ -66,6 +67,7 @@ class _ExtraSourcesScreenState extends State<ExtraSourcesScreen>
 
   @override
   void dispose() {
+    _extraSources.lockAdminSession();
     _tabController.dispose();
     _updNameCtrl.dispose();
     _updVersionCtrl.dispose();
@@ -203,6 +205,13 @@ class _ExtraSourcesScreenState extends State<ExtraSourcesScreen>
   }
 
   Future<String?> _promptPinOrVerifyOwner() async {
+    final sessionPin = _extraSources.sessionUnlockedPin;
+    if (sessionPin != null &&
+        sessionPin.isNotEmpty &&
+        await _extraSources.verifyPin(sessionPin)) {
+      return sessionPin;
+    }
+    if (!mounted) return null;
     final hasCreds = await _extraSources.hasVerifiedOwnerCredentials();
     if (!mounted) return null;
 
@@ -527,13 +536,14 @@ class _ExtraSourcesScreenState extends State<ExtraSourcesScreen>
                                         borderRadius:
                                             const BorderRadius.vertical(
                                                 top: Radius.circular(6)),
-                                        child: item.posterUrl.isNotEmpty
-                                            ? FastCachedImage(
-                                                url: item.posterUrl,
-                                                fit: BoxFit.cover,
-                                                width: double.infinity,
-                                              )
-                                            : const Icon(Icons.movie),
+                                        child: SizedBox(
+                                          width: double.infinity,
+                                          child: PosterImage(
+                                            url: item.posterUrl,
+                                            title: item.title,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                     Padding(
@@ -1204,9 +1214,11 @@ class _ExtraSourcesScreenState extends State<ExtraSourcesScreen>
           child: SizedBox(
             width: 44,
             height: 62,
-            child: m.posterUrl.isNotEmpty
-                ? FastCachedImage(url: m.posterUrl, fit: BoxFit.cover)
-                : const Icon(Icons.movie),
+            child: PosterImage(
+              url: m.posterUrl,
+              title: m.title,
+              fit: BoxFit.cover,
+            ),
           ),
         ),
         title: Text(
@@ -1734,6 +1746,48 @@ class _ExtraSourcesScreenState extends State<ExtraSourcesScreen>
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    if (!_extraSources.isAdminSessionUnlocked) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Źródła dodatkowe i Admin'),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_outline, size: 56, color: colorScheme.primary),
+                const SizedBox(height: 16),
+                const Text(
+                  'Wymagane zatwierdzenie administratora',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Aby wejść do zakładki Źródła dodatkowe, zatwierdź uprawnienia administratora (Token GitHub i PIN).',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: () async {
+                    final pin = await OwnerAuthGate.authorizeEntry(context);
+                    if (pin != null && pin.isNotEmpty && mounted) {
+                      await _loadOwnerStatus();
+                      if (mounted) setState(() {});
+                    }
+                  },
+                  icon: const Icon(Icons.verified_user_outlined),
+                  label: const Text('Zatwierdź tryb administratora'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Źródła dodatkowe i Admin'),

@@ -750,6 +750,8 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                                 child: PosterImage(
                                   url: movie.imageUrl,
                                   headers: movie.imageHeaders,
+                                  fallbacks: movie.fallbackPosterCandidates,
+                                  decodeWidth: 640,
                                   title: movie.title,
                                 ),
                               ),
@@ -831,6 +833,8 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                                           PosterImage(
                                             url: movie.imageUrl,
                                             headers: movie.imageHeaders,
+                                            fallbacks: movie.fallbackPosterCandidates,
+                                            decodeWidth: 500,
                                             title: movie.title,
                                           ),
                                           if (progress > 0)
@@ -1066,6 +1070,8 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                             PosterImage(
                               url: movie.imageUrl,
                               headers: movie.imageHeaders,
+                              fallbacks: movie.fallbackPosterCandidates,
+                              decodeWidth: 640,
                               title: movie.title,
                             ),
                             Container(
@@ -1381,6 +1387,7 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
                             child: PosterImage(
                               url: sim.imageUrl,
                               headers: sim.imageHeaders,
+                              fallbacks: sim.fallbackPosterCandidates,
                               title: sim.title,
                             ),
                           ),

@@ -10,62 +10,73 @@ import 'package:purevideo/data/repositories/auth_repository.dart';
 class BajeczkiAuthRepository implements AuthRepository {
   AccountModel? _account;
   final _authController = StreamController<AuthModel>.broadcast();
+  bool _userTouched = false;
+  late final Future<void> _initFuture;
 
   BajeczkiAuthRepository([AccountModel? account]) {
-    _account = account ??
-        AccountModel(
-          fields: const {'login': 'Gość'},
-          cookies: const [],
-          service: SupportedService.bajeczki,
-        );
-    _loadSavedAccount();
+    if (account != null) {
+      _account = account;
+    }
+    _initFuture = _loadSavedAccount();
   }
+
+  Future<void> ensureInitialized() => _initFuture;
 
   Future<void> _loadSavedAccount() async {
     try {
+      final loggedOut = await SecureStorageService.getServiceData(
+        SupportedService.bajeczki,
+        'logged_out',
+      );
+      if (_userTouched) return;
+      if (loggedOut == 'true') {
+        _account = null;
+        _authController.add(AuthModel(
+          service: SupportedService.bajeczki,
+          success: false,
+          account: null,
+        ));
+        return;
+      }
+
       final accountJson = await SecureStorageService.getServiceData(
         SupportedService.bajeczki,
         'account',
       );
+      if (_userTouched) return;
       if (accountJson != null) {
         _account = AccountModel.fromMap(jsonDecode(accountJson));
+      } else {
+        _account = AccountModel(
+          fields: const {'login': 'Dostęp publiczny'},
+          cookies: const [],
+          service: SupportedService.bajeczki,
+        );
+        await SecureStorageService.saveServiceData(
+          SupportedService.bajeczki,
+          'account',
+          jsonEncode(_account!.toMap()),
+        );
+      }
+      _authController.add(AuthModel(
+        service: SupportedService.bajeczki,
+        success: true,
+        account: _account,
+      ));
+    } catch (e) {
+      debugPrint('Błąd podczas ładowania konta Bajeczki.org: $e');
+      if (!_userTouched && _account == null) {
+        _account = AccountModel(
+          fields: const {'login': 'Dostęp publiczny'},
+          cookies: const [],
+          service: SupportedService.bajeczki,
+        );
         _authController.add(AuthModel(
           service: SupportedService.bajeczki,
           success: true,
           account: _account,
         ));
-      } else {
-        final loggedOut = await SecureStorageService.getServiceData(
-          SupportedService.bajeczki,
-          'logged_out',
-        );
-        if (loggedOut == 'true') {
-          _account = null;
-          _authController.add(AuthModel(
-            service: SupportedService.bajeczki,
-            success: false,
-            account: null,
-          ));
-        } else {
-          _account = AccountModel(
-            fields: const {'login': 'Gość'},
-            cookies: const [],
-            service: SupportedService.bajeczki,
-          );
-          await SecureStorageService.saveServiceData(
-            SupportedService.bajeczki,
-            'account',
-            jsonEncode(_account!.toMap()),
-          );
-          _authController.add(AuthModel(
-            service: SupportedService.bajeczki,
-            success: true,
-            account: _account,
-          ));
-        }
       }
-    } catch (e) {
-      debugPrint('Błąd podczas ładowania konta Bajeczki.org: $e');
     }
   }
 
@@ -74,12 +85,13 @@ class BajeczkiAuthRepository implements AuthRepository {
 
   @override
   Future<AuthModel> signIn(Map<String, String> fields) async {
+    _userTouched = true;
     await SecureStorageService.deleteServiceData(
       SupportedService.bajeczki,
       'logged_out',
     );
     _account = AccountModel(
-      fields: const {'login': 'Gość'},
+      fields: const {'login': 'Dostęp publiczny'},
       cookies: const [],
       service: SupportedService.bajeczki,
     );
@@ -102,6 +114,7 @@ class BajeczkiAuthRepository implements AuthRepository {
 
   @override
   Future<void> setAccount(AccountModel account) async {
+    _userTouched = true;
     _account = account;
     await SecureStorageService.deleteServiceData(
       SupportedService.bajeczki,
@@ -121,12 +134,8 @@ class BajeczkiAuthRepository implements AuthRepository {
 
   @override
   Future<void> signOut() async {
+    _userTouched = true;
     _account = null;
-    _authController.add(AuthModel(
-      service: SupportedService.bajeczki,
-      success: false,
-      account: null,
-    ));
     await SecureStorageService.deleteServiceData(
       SupportedService.bajeczki,
       'account',
@@ -136,6 +145,11 @@ class BajeczkiAuthRepository implements AuthRepository {
       'logged_out',
       'true',
     );
+    _authController.add(AuthModel(
+      service: SupportedService.bajeczki,
+      success: false,
+      account: null,
+    ));
   }
 
   void dispose() {

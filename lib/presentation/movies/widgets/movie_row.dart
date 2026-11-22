@@ -54,6 +54,7 @@ class MovieRow extends StatelessWidget {
                       child: PosterImage(
                         url: movie.imageUrl,
                         headers: movie.imageHeaders,
+                        fallbacks: movie.fallbackPosterCandidates,
                         title: movie.title,
                       ),
                     ),

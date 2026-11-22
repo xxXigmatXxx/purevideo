@@ -5,6 +5,7 @@ import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/di/injection_container.dart';
+import 'package:purevideo/presentation/settings/widgets/owner_auth_dialog.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_item.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_listenable.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_section.dart';
@@ -44,12 +45,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Źródła',
                 items: [
                   SettingsItem(
-                    icon: Icons.extension_outlined,
+                    icon: Icons.admin_panel_settings_outlined,
                     title: 'Źródła dodatkowe',
                     subtitle: _settingsService.extraSourcesEnabled
-                        ? 'Włączone • dodane filmy, seriale (CDA / Vider.info) i panel admina'
-                        : 'Wyłączone • włącz aby zobaczyć dodane filmy i seriale',
-                    onTap: () => context.pushNamed('extra_sources'),
+                        ? 'Włączone • dotknij, aby wejść (wymaga zatwierdzenia admina)'
+                        : 'Wyłączone • dotknij, aby wejść (wymaga zatwierdzenia admina)',
+                    onTap: () async {
+                      final pin = await OwnerAuthGate.authorizeEntry(context);
+                      if (pin == null || pin.isEmpty || !context.mounted) {
+                        return;
+                      }
+                      await context.pushNamed('extra_sources');
+                    },
                     trailing: Switch(
                       value: _settingsService.extraSourcesEnabled,
                       onChanged: (value) {

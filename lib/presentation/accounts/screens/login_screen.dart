@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/captcha_service.dart';
 import 'package:purevideo/core/utils/supported_enum.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_bloc.dart';
 import 'package:purevideo/presentation/accounts/bloc/accounts_event.dart';
-import 'package:go_router/go_router.dart';
+import 'package:purevideo/presentation/accounts/bloc/accounts_state.dart';
 
 class LoginScreen extends StatefulWidget {
   final SupportedService service;
@@ -21,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, String> _fieldValues = {};
   bool _hasRecaptcha = false;
+  bool _submittingPasswordless = false;
 
   @override
   void initState() {
@@ -38,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    for (var controller in _controllers.values) {
+    for (final controller in _controllers.values) {
       controller.dispose();
     }
     super.dispose();
@@ -46,48 +48,95 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPasswordless = widget.service.loginRequiredFields.isEmpty;
+
     return Scaffold(
       appBar: AppBar(title: Text('Logowanie do ${widget.service.displayName}')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ..._buildFormFields(),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _handleSubmit,
-                child: const Text('Zaloguj'),
-              ),
-              if (widget.service.canBeAnonymous) ...[
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: () {
-                    context.read<AccountsBloc>().add(
-                          SignInRequested(
-                            service: widget.service,
-                            fields: {'anonymous': 'true'},
-                          ),
-                        );
-                    if (context.canPop()) {
-                      context.pop();
-                    }
-                  },
-                  child: const Text('Zaloguj jako gość'),
+      body: BlocListener<AccountsBloc, AccountsState>(
+        listener: (context, state) {
+          if (_submittingPasswordless && state is AccountsLoaded) {
+            _submittingPasswordless = false;
+            if (context.canPop()) context.pop();
+          } else if (_submittingPasswordless && state is AccountsError) {
+            _submittingPasswordless = false;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(state.message)),
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: isPasswordless
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.public, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        '${widget.service.displayName} działa bez konta i hasła.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: () {
+                          setState(() => _submittingPasswordless = true);
+                          context.read<AccountsBloc>().add(
+                                SignInRequested(
+                                  service: widget.service,
+                                  fields: const {'anonymous': 'true'},
+                                ),
+                              );
+                        },
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: Text('Włącz ${widget.service.displayName}'),
+                      ),
+                    ],
+                  ),
+                )
+              : Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ..._buildFormFields(),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: _handleSubmit,
+                        child: const Text('Zaloguj'),
+                      ),
+                      if (widget.service.canBeAnonymous) ...[
+                        const SizedBox(height: 16),
+                        OutlinedButton(
+                          onPressed: () {
+                            context.read<AccountsBloc>().add(
+                                  SignInRequested(
+                                    service: widget.service,
+                                    fields: const {'anonymous': 'true'},
+                                  ),
+                                );
+                            if (context.canPop()) {
+                              context.pop();
+                            }
+                          },
+                          child: const Text('Zaloguj jako gość'),
+                        ),
+                      ]
+                    ],
+                  ),
                 ),
-              ]
-            ],
-          ),
         ),
       ),
     );
   }
 
   List<Widget> _buildFormFields() {
-    List<Widget> formFields = [];
-    for (var fieldMap in widget.service.loginRequiredFields) {
+    final List<Widget> formFields = [];
+    for (final fieldMap in widget.service.loginRequiredFields) {
       fieldMap.forEach((fieldName, inputType) {
         if (inputType == InputType.recaptcha) {
           formFields.add(
@@ -106,13 +155,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   : ElevatedButton(
                       onPressed: () async {
                         final token = await getIt<CaptchaService>().getToken(
-                            widget.service.loginCaptchaConfig,
-                            widget.service.baseUrl);
-
-                        if (token == null) {
-                          return;
-                        }
-
+                          widget.service.loginCaptchaConfig,
+                          widget.service.baseUrl,
+                        );
+                        if (token == null) return;
                         setState(() {
                           _fieldValues[fieldName] = token;
                         });

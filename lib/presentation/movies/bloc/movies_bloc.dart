@@ -9,6 +9,8 @@ import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/models/auth_model.dart';
 import 'package:purevideo/data/repositories/movie_repository.dart';
 import 'package:purevideo/data/repositories/auth_repository.dart';
+import 'package:purevideo/data/repositories/bajeczki/bajeczki_auth_repository.dart';
+import 'package:purevideo/data/repositories/docchi/docchi_auth_repository.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_event.dart';
 import 'package:purevideo/presentation/movies/bloc/movies_state.dart';
@@ -79,6 +81,10 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
     }
     _isRefreshing = true;
     try {
+      for (final repo in _authRepositories.values) {
+        if (repo is DocchiAuthRepository) await repo.ensureInitialized();
+        if (repo is BajeczkiAuthRepository) await repo.ensureInitialized();
+      }
       final loggedServices = _authRepositories.entries
           .where((entry) =>
               entry.value.getAccount() != null &&

@@ -14,6 +14,17 @@ import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:purevideo/di/injection_container.dart';
 
+String _cleanFilmanImg(String? dataSrc, String? src) {
+  for (final raw in [dataSrc, src]) {
+    var u = (raw ?? '').trim();
+    if (u.isEmpty || u.startsWith('data:') || u.contains('blank.')) continue;
+    if (u.startsWith('//')) return 'https:$u';
+    if (u.startsWith('/')) return 'https://filman.cc$u';
+    if (u.startsWith('http')) return u;
+  }
+  return '';
+}
+
 class FilmanMovieRepository implements MovieRepository {
   final AuthRepository _authRepository =
       getIt<Map<SupportedService, AuthRepository>>()[SupportedService.filman]!;
@@ -118,8 +129,7 @@ class FilmanMovieRepository implements MovieRepository {
             .trim();
         final imgEl = poster.querySelector('img');
         final imageUrl =
-            (imgEl?.attributes['data-src'] ?? imgEl?.attributes['src'] ?? '')
-                .trim();
+            _cleanFilmanImg(imgEl?.attributes['data-src'], imgEl?.attributes['src']);
         final link = (aTag?.attributes['href'] ?? '').trim();
         final category =
             list.parent?.querySelector('h3')?.text.trim() ?? 'Polecane';
@@ -179,8 +189,7 @@ class FilmanMovieRepository implements MovieRepository {
         document.querySelector('.description')?.text.trim() ?? '';
     final posterImg = document.querySelector('#single-poster img');
     final imageUrl =
-        (posterImg?.attributes['src'] ?? posterImg?.attributes['data-src'] ?? '')
-            .trim();
+        _cleanFilmanImg(posterImg?.attributes['src'], posterImg?.attributes['data-src']);
 
     final episodeList = document.querySelector('#episode-list');
     final isSeries = episodeList != null;

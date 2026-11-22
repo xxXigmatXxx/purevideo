@@ -1,43 +1,144 @@
-import 'package:fast_cached_network_image/fast_cached_network_image.dart';
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
-class PosterImage extends StatelessWidget {
+import 'package:flutter/material.dart';
+import 'package:purevideo/core/services/poster_cache_service.dart';
+
+class PosterImage extends StatefulWidget {
   final String url;
   final Map<String, String>? headers;
+  final List<PosterCandidate> fallbacks;
   final String? title;
   final BoxFit fit;
   final Alignment alignment;
+  final int decodeWidth;
 
   const PosterImage({
     super.key,
     required this.url,
     this.headers,
+    this.fallbacks = const [],
     this.title,
     this.fit = BoxFit.cover,
     this.alignment = Alignment.topCenter,
+    this.decodeWidth = 360,
   });
 
-  static String normalizeUrl(String raw) {
+  static String normalizeUrl(String raw, {bool smallCard = true}) {
     var u = raw.trim();
-    if (u.isEmpty) return '';
+    if (u.isEmpty || u.startsWith('data:')) return '';
     if (u.startsWith('//')) {
       u = 'https:$u';
     }
-    if (u.startsWith('http://image.tmdb.org') ||
-        u.startsWith('http://ekino.ws') ||
-        u.startsWith('http://www.obejrzyj.to') ||
-        u.startsWith('http://obejrzyj.to') ||
-        u.startsWith('http://filman.cc')) {
-      u = u.replaceFirst('http://', 'https://');
+    if (u.startsWith('http://')) {
+      final lower = u.toLowerCase();
+      if (lower.contains('tmdb.org') ||
+          lower.contains('ekino.ws') ||
+          lower.contains('obejrzyj.to') ||
+          lower.contains('filman.cc') ||
+          lower.contains('docchi.pl') ||
+          lower.contains('bajeczki.org') ||
+          lower.contains('myanimelist.net') ||
+          lower.contains('anilist.co') ||
+          lower.contains('fwcdn.pl')) {
+        u = u.replaceFirst('http://', 'https://');
+      }
     }
-    if (u.contains('image.tmdb.org/t/p/original/')) {
-      u = u.replaceFirst('image.tmdb.org/t/p/original/', 'image.tmdb.org/t/p/w500/');
+    if (u.contains('image.tmdb.org/t/p/')) {
+      if (smallCard) {
+        u = u
+            .replaceFirst('/t/p/original/', '/t/p/w342/')
+            .replaceFirst('/t/p/w1280/', '/t/p/w342/')
+            .replaceFirst('/t/p/w780/', '/t/p/w342/')
+            .replaceFirst('/t/p/w500/', '/t/p/w342/');
+      } else {
+        u = u.replaceFirst('/t/p/original/', '/t/p/w500/');
+      }
     }
     return u;
   }
 
+  @override
+  State<PosterImage> createState() => _PosterImageState();
+}
+
+class _PosterImageState extends State<PosterImage> {
+  Uint8List? _bytes;
+  bool _failed = false;
+  int _loadEpoch = 0;
+
+  bool get _isSmallCard => widget.decodeWidth <= 420;
+
+  List<PosterCandidate> _normalizedFallbacks() {
+    return widget.fallbacks
+        .map((c) => PosterCandidate(
+              url: PosterImage.normalizeUrl(c.url, smallCard: _isSmallCard),
+              headers: c.headers,
+            ))
+        .where((c) => c.url.isNotEmpty)
+        .toList();
+  }
+
+  void _initLoad() {
+    _loadEpoch++;
+    final epoch = _loadEpoch;
+    final cleanUrl =
+        PosterImage.normalizeUrl(widget.url, smallCard: _isSmallCard);
+    final fallbacks = _normalizedFallbacks();
+
+    if (cleanUrl.isEmpty && fallbacks.isEmpty) {
+      _bytes = null;
+      _failed = true;
+      return;
+    }
+
+    final memHit = PosterCacheService.instance
+        .getCachedSync(cleanUrl, fallbacks: fallbacks);
+    if (memHit != null) {
+      _bytes = memHit;
+      _failed = false;
+      return;
+    }
+
+    _bytes = null;
+    _failed = false;
+
+    PosterCacheService.instance
+        .loadPoster(
+      cleanUrl,
+      headers: widget.headers,
+      fallbacks: fallbacks,
+    )
+        .then((data) {
+      if (!mounted || epoch != _loadEpoch) return;
+      setState(() {
+        if (data != null) {
+          _bytes = data;
+          _failed = false;
+        } else {
+          _failed = true;
+        }
+      });
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initLoad();
+  }
+
+  @override
+  void didUpdateWidget(covariant PosterImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url ||
+        oldWidget.decodeWidth != widget.decodeWidth ||
+        oldWidget.fallbacks.length != widget.fallbacks.length) {
+      _initLoad();
+    }
+  }
+
   Widget _buildFallback() {
-    final t = (title ?? '').trim();
+    final t = (widget.title ?? '').trim();
     return Container(
       color: const Color(0xFF1A1A1A),
       padding: const EdgeInsets.all(8),
@@ -72,32 +173,24 @@ class PosterImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cleanUrl = normalizeUrl(url);
-    if (cleanUrl.isEmpty || !cleanUrl.startsWith('http')) {
+    if (_failed) {
       return _buildFallback();
     }
-
-    final Map<String, String>? cleanHeaders =
-        (headers != null && headers!.isNotEmpty) ? headers : null;
-
-    return FastCachedImage(
-      url: cleanUrl,
-      headers: cleanHeaders,
-      fit: fit,
-      alignment: alignment,
-      fadeInDuration: const Duration(milliseconds: 160),
-      loadingBuilder: (context, progress) => Container(
-        color: const Color(0xFF1A1A1A),
-      ),
-      errorBuilder: (context, error, stackTrace) {
-        return Image.network(
-          cleanUrl,
-          headers: cleanHeaders,
-          fit: fit,
-          alignment: alignment,
-          errorBuilder: (_, __, ___) => _buildFallback(),
-        );
-      },
+    final bytes = _bytes;
+    if (bytes == null) {
+      return Container(color: const Color(0xFF1A1A1A));
+    }
+    final provider = ResizeImage.resizeIfNeeded(
+      widget.decodeWidth,
+      null,
+      MemoryImage(bytes),
+    );
+    return Image(
+      image: provider,
+      fit: widget.fit,
+      alignment: widget.alignment,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => _buildFallback(),
     );
   }
 }

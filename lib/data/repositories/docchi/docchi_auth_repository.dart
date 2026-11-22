@@ -10,62 +10,73 @@ import 'package:purevideo/data/repositories/auth_repository.dart';
 class DocchiAuthRepository implements AuthRepository {
   AccountModel? _account;
   final _authController = StreamController<AuthModel>.broadcast();
+  bool _userTouched = false;
+  late final Future<void> _initFuture;
 
   DocchiAuthRepository([AccountModel? account]) {
-    _account = account ??
-        AccountModel(
-          fields: const {'login': 'Gość'},
-          cookies: const [],
-          service: SupportedService.docchi,
-        );
-    _loadSavedAccount();
+    if (account != null) {
+      _account = account;
+    }
+    _initFuture = _loadSavedAccount();
   }
+
+  Future<void> ensureInitialized() => _initFuture;
 
   Future<void> _loadSavedAccount() async {
     try {
+      final loggedOut = await SecureStorageService.getServiceData(
+        SupportedService.docchi,
+        'logged_out',
+      );
+      if (_userTouched) return;
+      if (loggedOut == 'true') {
+        _account = null;
+        _authController.add(AuthModel(
+          service: SupportedService.docchi,
+          success: false,
+          account: null,
+        ));
+        return;
+      }
+
       final accountJson = await SecureStorageService.getServiceData(
         SupportedService.docchi,
         'account',
       );
+      if (_userTouched) return;
       if (accountJson != null) {
         _account = AccountModel.fromMap(jsonDecode(accountJson));
+      } else {
+        _account = AccountModel(
+          fields: const {'login': 'Dostęp publiczny'},
+          cookies: const [],
+          service: SupportedService.docchi,
+        );
+        await SecureStorageService.saveServiceData(
+          SupportedService.docchi,
+          'account',
+          jsonEncode(_account!.toMap()),
+        );
+      }
+      _authController.add(AuthModel(
+        service: SupportedService.docchi,
+        success: true,
+        account: _account,
+      ));
+    } catch (e) {
+      debugPrint('Błąd podczas ładowania konta Docchi.pl: $e');
+      if (!_userTouched && _account == null) {
+        _account = AccountModel(
+          fields: const {'login': 'Dostęp publiczny'},
+          cookies: const [],
+          service: SupportedService.docchi,
+        );
         _authController.add(AuthModel(
           service: SupportedService.docchi,
           success: true,
           account: _account,
         ));
-      } else {
-        final loggedOut = await SecureStorageService.getServiceData(
-          SupportedService.docchi,
-          'logged_out',
-        );
-        if (loggedOut == 'true') {
-          _account = null;
-          _authController.add(AuthModel(
-            service: SupportedService.docchi,
-            success: false,
-            account: null,
-          ));
-        } else {
-          _account = AccountModel(
-            fields: const {'login': 'Gość'},
-            cookies: const [],
-            service: SupportedService.docchi,
-          );
-          await SecureStorageService.saveServiceData(
-            SupportedService.docchi,
-            'account',
-            jsonEncode(_account!.toMap()),
-          );
-          _authController.add(AuthModel(
-            service: SupportedService.docchi,
-            success: true,
-            account: _account,
-          ));
-        }
       }
-    } catch (e) {
-      debugPrint('Błąd podczas ładowania konta Docchi.pl: $e');
     }
   }
 
@@ -74,12 +85,13 @@ class DocchiAuthRepository implements AuthRepository {
 
   @override
   Future<AuthModel> signIn(Map<String, String> fields) async {
+    _userTouched = true;
     await SecureStorageService.deleteServiceData(
       SupportedService.docchi,
       'logged_out',
     );
     _account = AccountModel(
-      fields: const {'login': 'Gość'},
+      fields: const {'login': 'Dostęp publiczny'},
       cookies: const [],
       service: SupportedService.docchi,
     );
@@ -102,6 +114,7 @@ class DocchiAuthRepository implements AuthRepository {
 
   @override
   Future<void> setAccount(AccountModel account) async {
+    _userTouched = true;
     _account = account;
     await SecureStorageService.deleteServiceData(
       SupportedService.docchi,
@@ -121,12 +134,8 @@ class DocchiAuthRepository implements AuthRepository {
 
   @override
   Future<void> signOut() async {
+    _userTouched = true;
     _account = null;
-    _authController.add(AuthModel(
-      service: SupportedService.docchi,
-      success: false,
-      account: null,
-    ));
     await SecureStorageService.deleteServiceData(
       SupportedService.docchi,
       'account',
@@ -136,6 +145,11 @@ class DocchiAuthRepository implements AuthRepository {
       'logged_out',
       'true',
     );
+    _authController.add(AuthModel(
+      service: SupportedService.docchi,
+      success: false,
+      account: null,
+    ));
   }
 
   void dispose() {

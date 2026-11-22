@@ -133,6 +133,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                                   child: PosterImage(
                                     url: m.imageUrl,
                                     headers: m.imageHeaders,
+                                    fallbacks: m.fallbackPosterCandidates,
                                     title: m.title,
                                   ),
                                 ),
@@ -210,6 +211,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                                     PosterImage(
                                       url: movie.imageUrl,
                                       headers: movie.imageHeaders,
+                                      fallbacks: movie.fallbackPosterCandidates,
                                       title: movie.title,
                                     ),
                                     if (!DeviceUtils.isTv)

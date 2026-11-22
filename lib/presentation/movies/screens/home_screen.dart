@@ -64,6 +64,7 @@ class MovieListItem extends StatelessWidget {
             PosterImage(
               url: movie.imageUrl,
               headers: movie.imageHeaders,
+              fallbacks: movie.fallbackPosterCandidates,
               title: movie.title,
             ),
             // Top-left PureVideo 'P' watermark
@@ -911,6 +912,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: PosterImage(
                     url: movie.imageUrl,
                     headers: movie.imageHeaders,
+                    fallbacks: movie.fallbackPosterCandidates,
+                    decodeWidth: 640,
                     title: movie.title,
                   ),
                 ),
@@ -1070,6 +1073,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: PosterImage(
                             url: movie.imageUrl,
                             headers: movie.imageHeaders,
+                            fallbacks: movie.fallbackPosterCandidates,
+                            decodeWidth: 540,
                             title: movie.title,
                           ),
                         ),
@@ -1126,6 +1131,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 PosterImage(
                   url: movie.imageUrl,
                   headers: movie.imageHeaders,
+                  fallbacks: movie.fallbackPosterCandidates,
+                  decodeWidth: 640,
                   title: movie.title,
                 ),
                 Container(
@@ -1358,6 +1365,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     PosterImage(
                                       url: movie.imageUrl,
                                       headers: movie.imageHeaders,
+                                      fallbacks: movie.fallbackPosterCandidates,
                                       title: movie.title,
                                     ),
                                     Container(color: Colors.black26),

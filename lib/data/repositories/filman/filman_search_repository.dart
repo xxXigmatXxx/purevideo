@@ -8,6 +8,17 @@ import 'package:purevideo/data/repositories/search_repository.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:html/parser.dart' as html;
 
+String _cleanFilmanImg(String? dataSrc, String? src) {
+  for (final raw in [dataSrc, src]) {
+    var u = (raw ?? '').trim();
+    if (u.isEmpty || u.startsWith('data:') || u.contains('blank.')) continue;
+    if (u.startsWith('//')) return 'https:$u';
+    if (u.startsWith('/')) return 'https://filman.cc$u';
+    if (u.startsWith('http')) return u;
+  }
+  return '';
+}
+
 class FilmanSearchRepository extends SearchRepository {
   final AuthRepository _authRepository =
       getIt<Map<SupportedService, AuthRepository>>()[SupportedService.filman]!;
@@ -62,8 +73,7 @@ class FilmanSearchRepository extends SearchRepository {
           .trim();
       final imgEl = poster.querySelector('img');
       final imageUrl =
-          (imgEl?.attributes['src'] ?? imgEl?.attributes['data-src'] ?? '')
-              .trim();
+          _cleanFilmanImg(imgEl?.attributes['data-src'], imgEl?.attributes['src']);
       final link = (aTag?.attributes['href'] ?? '').trim();
 
       if (title.isEmpty ||
