@@ -12,7 +12,7 @@
         android:label="PureVideo"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:banner="@mipmap/ic_launcher"
+        android:banner="@drawable/tv_banner"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
@@ -36,7 +36,7 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round"
-            android:banner="@mipmap/ic_launcher"
+            android:banner="@drawable/tv_banner"
             android:label="PureVideo"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -52,7 +52,7 @@
             android:exported="true"
             android:icon="@drawable/ic_launcher_netflix"
             android:roundIcon="@drawable/ic_launcher_netflix"
-            android:banner="@drawable/ic_launcher_netflix"
+            android:banner="@drawable/tv_banner"
             android:label="Netflix"
             android:targetActivity=".MainActivity">
             <intent-filter>

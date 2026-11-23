@@ -1,0 +1,76 @@
+group = "com.gianlucaparadise.flutter_cast_framework"
+version = "1.0-SNAPSHOT"
+
+buildscript {
+    ext.kotlin_version = "2.1.0"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.3")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace = "com.gianlucaparadise.flutter_cast_framework"
+    compileSdk = 35
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 21
+    }
+
+    dependencies {
+        def lifecycle_version = "2.0.0"
+
+        implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.5.31"
+
+        api "com.google.android.gms:play-services-cast-framework:20.1.0"
+        implementation 'androidx.appcompat:appcompat:1.4.0'
+        implementation 'androidx.mediarouter:mediarouter:1.3.1'
+
+        // Lifecycle
+        implementation "androidx.lifecycle:lifecycle-extensions:$lifecycle_version"
+        implementation "androidx.lifecycle:lifecycle-common-java8:$lifecycle_version"
+
+        // To open TracksChooserDialogFragment
+        implementation "androidx.activity:activity-ktx:1.3.1"
+    }
+    
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}

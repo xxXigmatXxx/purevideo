@@ -54,7 +54,11 @@ void main() async {
     debugPrint('FastCachedImageConfig init error: $e');
   }
 
-  MediaKit.ensureInitialized();
+  try {
+    MediaKit.ensureInitialized();
+  } catch (e) {
+    debugPrint('MediaKit init skipped: $e');
+  }
   Hive.init((await getApplicationDocumentsDirectory()).path);
 
   setupHiveAdapters();
@@ -82,18 +86,22 @@ void main() async {
     ),
   );
 
-  if (DeviceUtils.isTv) {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  } else {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  try {
+    if (DeviceUtils.isTv) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  } catch (e) {
+    debugPrint('SystemChrome init skipped: $e');
   }
 
   try {

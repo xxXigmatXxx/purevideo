@@ -117,14 +117,18 @@ class MovieModel {
     return list;
   }
 
-  ServiceMovieModel get _bestPosterService => _rankedPosterServices.first;
+  ServiceMovieModel? get _bestPosterService =>
+      services.isEmpty ? null : _rankedPosterServices.first;
 
-  String get title => services.first.title;
+  String get title => services.isEmpty ? '' : services.first.title;
 
-  String get imageUrl => normalizePosterUrl(_bestPosterService.imageUrl);
+  String get imageUrl => _bestPosterService == null
+      ? ''
+      : normalizePosterUrl(_bestPosterService!.imageUrl);
 
   Map<String, String> get imageHeaders {
     final best = _bestPosterService;
+    if (best == null) return const {};
     return buildImageHeaders(best.service, normalizePosterUrl(best.imageUrl));
   }
 
