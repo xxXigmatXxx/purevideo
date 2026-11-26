@@ -4,6 +4,7 @@ class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final ValueChanged<bool>? onFocusChange;
   final BorderRadius borderRadius;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -11,19 +12,24 @@ class TvFocusable extends StatefulWidget {
   final double focusBorderWidth;
   final double focusScale;
   final EdgeInsetsGeometry? padding;
+  final bool ensureVisibleOnFocus;
+  final double ensureVisibleAlignment;
 
   const TvFocusable({
     super.key,
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.borderRadius = const BorderRadius.all(Radius.circular(8)),
+    this.onFocusChange,
+    this.borderRadius = const BorderRadius.all(Radius.circular(10)),
     this.autofocus = false,
     this.focusNode,
     this.focusBorderColor = Colors.white,
     this.focusBorderWidth = 2.5,
     this.focusScale = 1.03,
     this.padding,
+    this.ensureVisibleOnFocus = true,
+    this.ensureVisibleAlignment = 0.38,
   });
 
   @override
@@ -48,8 +54,8 @@ class _TvFocusableState extends State<TvFocusable> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: widget.focusBorderColor.withAlpha(90),
-                  blurRadius: 12,
+                  color: widget.focusBorderColor.withAlpha(80),
+                  blurRadius: 14,
                   spreadRadius: 1,
                 ),
               ],
@@ -74,20 +80,21 @@ class _TvFocusableState extends State<TvFocusable> {
         focusNode: widget.focusNode,
         autofocus: widget.autofocus,
         borderRadius: widget.borderRadius,
-        focusColor: Colors.white.withAlpha(28),
-        hoverColor: Colors.white.withAlpha(18),
+        focusColor: Colors.white.withAlpha(20),
+        hoverColor: Colors.white.withAlpha(14),
         onTap: widget.onTap,
         onLongPress: widget.onLongPress,
         onFocusChange: (focused) {
           if (mounted) {
             setState(() => _isFocused = focused);
           }
-          if (focused) {
+          widget.onFocusChange?.call(focused);
+          if (focused && widget.ensureVisibleOnFocus) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 Scrollable.ensureVisible(
                   context,
-                  alignment: 0.35,
+                  alignment: widget.ensureVisibleAlignment,
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
                 );

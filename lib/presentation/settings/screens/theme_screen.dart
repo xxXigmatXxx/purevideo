@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/di/injection_container.dart';
+import 'package:purevideo/presentation/global/widgets/purevideo_logo.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_item.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_listenable.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_section.dart';
@@ -61,22 +62,24 @@ class _ThemeScreenState extends State<ThemeScreen> {
     required String displayName,
     required Widget badge,
   }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        badge,
-        const SizedBox(width: 4),
-        Radio<String>(
-          value: value,
-          groupValue: groupValue,
-          activeColor: const Color(0xFFE50914),
-          onChanged: (val) {
-            if (val != null) {
-              _selectAppIcon(val, displayName);
-            }
-          },
-        ),
-      ],
+    return ExcludeFocus(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          badge,
+          const SizedBox(width: 4),
+          Radio<String>(
+            value: value,
+            groupValue: groupValue,
+            activeColor: kPureVideoRed,
+            onChanged: (val) {
+              if (val != null) {
+                _selectAppIcon(val, displayName);
+              }
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -91,7 +94,6 @@ class _ThemeScreenState extends State<ThemeScreen> {
         builder: (context, box, _) {
           final currentStyle = _settingsService.uiStyle;
           final currentIcon = _settingsService.appIcon;
-
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -110,39 +112,43 @@ class _ThemeScreenState extends State<ThemeScreen> {
                           _settingsService.setUiStyle('netflix');
                         });
                       },
-                      trailing: Radio<String>(
-                        value: 'netflix',
-                        groupValue: currentStyle,
-                        activeColor: const Color(0xFFE50914),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() {
-                              _settingsService.setUiStyle(val);
-                            });
-                          }
-                        },
+                      trailing: ExcludeFocus(
+                        child: Radio<String>(
+                          value: 'netflix',
+                          groupValue: currentStyle,
+                          activeColor: kPureVideoRed,
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _settingsService.setUiStyle(val);
+                              });
+                            }
+                          },
+                        ),
                       ),
                     ),
                     SettingsItem(
                       icon: Icons.grid_view_rounded,
                       title: 'Oryginalny (PureVideo)',
                       subtitle:
-                          'Klasyczny fioletowy wygląd Material 3 z siatką filmów',
+                          'Klasyczny widok siatki filmów z szybkim dostępem',
                       onTap: () {
                         setState(() {
                           _settingsService.setUiStyle('original');
                         });
                       },
-                      trailing: Radio<String>(
-                        value: 'original',
-                        groupValue: currentStyle,
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() {
-                              _settingsService.setUiStyle(val);
-                            });
-                          }
-                        },
+                      trailing: ExcludeFocus(
+                        child: Radio<String>(
+                          value: 'original',
+                          groupValue: currentStyle,
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _settingsService.setUiStyle(val);
+                              });
+                            }
+                          },
+                        ),
                       ),
                     ),
                   ],
@@ -164,23 +170,25 @@ class _ThemeScreenState extends State<ThemeScreen> {
                             );
                           });
                         },
-                        trailing: Switch(
-                          value: _settingsService.isDarkMode,
-                          activeColor: _settingsService.isSystemBrightness
-                              ? Colors.grey
-                              : null,
-                          onChanged: (value) {
-                            if (_settingsService.isSystemBrightness) return;
-                            setState(() {
-                              _settingsService.setDarkMode(value);
-                            });
-                          },
+                        trailing: ExcludeFocus(
+                          child: Switch(
+                            value: _settingsService.isDarkMode,
+                            activeColor: _settingsService.isSystemBrightness
+                                ? Colors.grey
+                                : null,
+                            onChanged: (value) {
+                              if (_settingsService.isSystemBrightness) return;
+                              setState(() {
+                                _settingsService.setDarkMode(value);
+                              });
+                            },
+                          ),
                         ),
                       ),
                       SettingsItem(
                         icon: Icons.brightness_auto_outlined,
                         title: 'Tryb systemowy',
-                        subtitle: 'Dopasuj jasność do ustawień telefonu',
+                        subtitle: 'Dopasuj jasność do ustawień urządzenia',
                         onTap: () {
                           setState(() {
                             _settingsService.setSystemBrightness(
@@ -188,13 +196,15 @@ class _ThemeScreenState extends State<ThemeScreen> {
                             );
                           });
                         },
-                        trailing: Switch(
-                          value: _settingsService.isSystemBrightness,
-                          onChanged: (value) {
-                            setState(() {
-                              _settingsService.setSystemBrightness(value);
-                            });
-                          },
+                        trailing: ExcludeFocus(
+                          child: Switch(
+                            value: _settingsService.isSystemBrightness,
+                            onChanged: (value) {
+                              setState(() {
+                                _settingsService.setSystemBrightness(value);
+                              });
+                            },
+                          ),
                         ),
                       ),
                     ],
@@ -206,17 +216,17 @@ class _ThemeScreenState extends State<ThemeScreen> {
                   items: [
                     SettingsItem(
                       icon: Icons.apps_rounded,
-                      title: 'Oryginalna (PureVideo)',
-                      subtitle: 'Domyślna ikona i nazwa „PureVideo”',
+                      title: 'PureVideo (Spójna ikona)',
+                      subtitle:
+                          'Domyślna ikona P▶, baner TV i nazwa „PureVideo”',
                       onTap: () => _selectAppIcon('default', 'PureVideo'),
                       trailing: _buildIconRadio(
                         value: 'default',
                         groupValue: currentIcon,
                         displayName: 'PureVideo',
-                        badge: _buildIconBadge(
-                          bg: const Color(0xFF4A148C),
-                          fg: Colors.white,
-                          letter: 'P',
+                        badge: const PureVideoMark(
+                          size: 36,
+                          withDarkTile: true,
                         ),
                       ),
                     ),
@@ -232,7 +242,7 @@ class _ThemeScreenState extends State<ThemeScreen> {
                         displayName: 'Netflix',
                         badge: _buildIconBadge(
                           bg: const Color(0xFF000000),
-                          fg: const Color(0xFFE50914),
+                          fg: kPureVideoRed,
                           letter: 'N',
                         ),
                       ),

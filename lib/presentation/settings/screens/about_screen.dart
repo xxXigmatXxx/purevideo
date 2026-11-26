@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:purevideo/presentation/global/widgets/purevideo_logo.dart';
 
 class AboutScreen extends StatefulWidget {
   const AboutScreen({super.key});
@@ -83,38 +84,15 @@ class _AboutScreenState extends State<AboutScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 24),
-              Hero(
+              const Hero(
                 tag: 'app_logo',
-                child: Container(
-                  height: 120,
-                  width: 120,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: colorScheme.shadow.withValues(alpha: 0.3),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Icon(
-                      Icons.play_circle_filled,
-                      size: 64,
-                      color: colorScheme.onPrimaryContainer,
-                    ),
-                  ),
+                child: PureVideoMark(
+                  size: 112,
+                  withDarkTile: true,
                 ),
               ),
-              const SizedBox(height: 24),
-              Text(
-                _packageInfo.appName,
-                style: textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              const SizedBox(height: 20),
+              const PureVideoWordmark(height: 32),
               const SizedBox(height: 8),
               GestureDetector(
                 onTap: _handleVersionTap,

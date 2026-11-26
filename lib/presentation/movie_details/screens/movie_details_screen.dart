@@ -1410,11 +1410,12 @@ class _MovieDetailsViewState extends State<MovieDetailsView> {
     required String label,
     required VoidCallback onTap,
   }) {
-    return InkWell(
+    return TvFocusable(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
+      focusScale: 1.04,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

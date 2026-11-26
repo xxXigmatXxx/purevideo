@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
@@ -7,10 +8,12 @@ import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/models/watched_model.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/global/widgets/poster_image.dart';
+import 'package:purevideo/presentation/global/widgets/purevideo_logo.dart';
 import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
+import 'package:purevideo/presentation/movies/widgets/tv_expandable_movie_row.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_listenable.dart';
 
-const Color _kNetflixRed = Color(0xFFE50914);
+const Color _kNetflixRed = kPureVideoRed;
 
 class WatchedMoviesScreen extends StatefulWidget {
   const WatchedMoviesScreen({super.key});
@@ -31,30 +34,33 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
         width > 1100 ? 6 : (width > 760 ? 5 : (width > 560 ? 4 : 3));
 
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: const Text(
-          'Moje PureVideo',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-            fontSize: 22,
-          ),
-        ),
-        actions: [
-          IconButton(
-            focusColor: Colors.white24,
-            icon: const Icon(Icons.search, color: Colors.white),
-            onPressed: () => context.go('/search'),
-          ),
-          IconButton(
-            focusColor: Colors.white24,
-            icon: const Icon(Icons.manage_accounts_outlined, color: Colors.white),
-            onPressed: () => context.pushNamed('accounts'),
-          ),
-        ],
-      ),
+      backgroundColor: const Color(0xFF0A0A0D),
+      appBar: isWide
+          ? null
+          : AppBar(
+              backgroundColor: Colors.black,
+              title: const Text(
+                'Moje PureVideo',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 22,
+                ),
+              ),
+              actions: [
+                IconButton(
+                  focusColor: Colors.white24,
+                  icon: const Icon(Icons.search, color: Colors.white),
+                  onPressed: () => context.go('/search'),
+                ),
+                IconButton(
+                  focusColor: Colors.white24,
+                  icon: const Icon(Icons.manage_accounts_outlined,
+                      color: Colors.white),
+                  onPressed: () => context.pushNamed('accounts'),
+                ),
+              ],
+            ),
       body: SettingsListenable(
         builder: (context, box, _) {
           final myList = _settingsService.getMyList();
@@ -93,6 +99,75 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                 );
               }
 
+              if (isWide) {
+                final watchedItems = watchedMovies.map((w) {
+                  final m = MovieModel(
+                    services: w.movie.services
+                        .map((s) => ServiceMovieModel(
+                              service: s.service,
+                              url: s.url,
+                              title: s.title,
+                              imageUrl: s.imageUrl,
+                            ))
+                        .toList(),
+                  );
+                  final lastEp = w.lastWatchedEpisode;
+                  final int watchedSec = lastEp != null
+                      ? lastEp.watchedEpisode.watchedTime
+                      : w.watchedTime;
+                  final int denom = w.movie.isSeries ? 2700 : 5700;
+                  final double progress =
+                      (watchedSec / denom).clamp(0.06, 0.96);
+                  final String subtitle = lastEp != null
+                      ? 'S${lastEp.season.number}:E${lastEp.watchedEpisode.episode.number}'
+                      : '${(watchedSec ~/ 60) > 0 ? (watchedSec ~/ 60) : 1} min';
+                  return TvExpandableRowItem(
+                    movie: m,
+                    progress: progress,
+                    episodeLabel: subtitle,
+                    subtitleOverride: lastEp != null
+                        ? 'Kontynuuj odtwarzanie ($subtitle)'
+                        : 'Obejrzano: $subtitle',
+                  );
+                }).toList();
+
+                return CustomScrollView(
+                  slivers: [
+                    if (myList.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: TvExpandableMovieRow(
+                          title: 'Moja lista',
+                          autofocusFirst: true,
+                          items: myList
+                              .map((m) => TvExpandableRowItem(movie: m))
+                              .toList(),
+                          onItemLongPress: (item) =>
+                              _settingsService.toggleMyList(item.movie),
+                        ),
+                      ),
+                    if (watchedItems.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: TvExpandableMovieRow(
+                          title: 'Kontynuuj oglądanie',
+                          autofocusFirst: myList.isEmpty,
+                          items: watchedItems,
+                          onItemLongPress: (rowItem) {
+                            final found = watchedMovies.firstWhere(
+                              (w) =>
+                                  MergeService.normalizeTitle(w.movie.title) ==
+                                  MergeService.normalizeTitle(
+                                      rowItem.movie.title),
+                              orElse: () => watchedMovies.first,
+                            );
+                            _watchedService.removeMovie(found.movie);
+                          },
+                        ),
+                      ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 60)),
+                  ],
+                );
+              }
+
               return CustomScrollView(
                 slivers: [
                   if (myList.isNotEmpty) ...[
@@ -111,7 +186,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                     ),
                     SliverToBoxAdapter(
                       child: SizedBox(
-                        height: isWide ? 210 : 170,
+                        height: 170,
                         child: ListView.separated(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           scrollDirection: Axis.horizontal,
@@ -121,7 +196,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                           itemBuilder: (context, index) {
                             final m = myList[index];
                             return SizedBox(
-                              width: isWide ? 140 : 114,
+                              width: 114,
                               child: TvFocusable(
                                 borderRadius: BorderRadius.circular(6),
                                 onTap: () => context.pushNamed(
@@ -149,7 +224,7 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(16, 22, 16, 10),
                         child: Text(
-                          'Ostatnio oglądane',
+                          'Kontynuuj oglądanie',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -159,13 +234,12 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                       ),
                     ),
                     SliverPadding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverGrid(
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: crossAxisCount,
-                          childAspectRatio: 0.63,
-                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.67,
+                          crossAxisSpacing: 10,
                           mainAxisSpacing: 12,
                         ),
                         delegate: SliverChildBuilderDelegate(
@@ -173,11 +247,11 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                             final item = watchedMovies[index];
                             final movie = MovieModel(
                               services: item.movie.services
-                                  .map((e) => ServiceMovieModel(
-                                        service: e.service,
-                                        url: e.url,
-                                        title: e.title,
-                                        imageUrl: e.imageUrl,
+                                  .map((s) => ServiceMovieModel(
+                                        service: s.service,
+                                        url: s.url,
+                                        title: s.title,
+                                        imageUrl: s.imageUrl,
                                       ))
                                   .toList(),
                             );
@@ -185,26 +259,20 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                             final int watchedSec = lastEp != null
                                 ? lastEp.watchedEpisode.watchedTime
                                 : item.watchedTime;
-                            final int denom =
-                                item.movie.isSeries ? 2700 : 5700;
+                            final int denom = item.movie.isSeries ? 2700 : 5700;
                             final double progress =
-                                (watchedSec / denom).clamp(0.08, 0.96);
-                            final String badge = lastEp != null
+                                (watchedSec / denom).clamp(0.06, 0.96);
+                            final String subtitle = lastEp != null
                                 ? 'S${lastEp.season.number}:E${lastEp.watchedEpisode.episode.number}'
                                 : '${(watchedSec ~/ 60) > 0 ? (watchedSec ~/ 60) : 1} min';
-
                             return TvFocusable(
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(8),
                               onTap: () => context.pushNamed(
                                 'movie_details_plain',
                                 extra: movie,
                               ),
-                              onLongPress: DeviceUtils.isTv
-                                  ? () =>
-                                      _watchedService.removeMovie(item.movie)
-                                  : null,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(8),
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
@@ -214,50 +282,40 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                                       fallbacks: movie.fallbackPosterCandidates,
                                       title: movie.title,
                                     ),
-                                    if (!DeviceUtils.isTv)
-                                      Positioned(
-                                        top: 4,
-                                        right: 4,
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            _watchedService
-                                                .removeMovie(item.movie);
-                                          },
-                                          child: Container(
-                                            padding: const EdgeInsets.all(4),
-                                            decoration: const BoxDecoration(
-                                              color: Colors.black87,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(
-                                              Icons.close,
-                                              color: Colors.white70,
-                                              size: 14,
-                                            ),
+                                    Container(color: Colors.black26),
+                                    Positioned(
+                                      top: 4,
+                                      right: 4,
+                                      child: GestureDetector(
+                                        onTap: () => _watchedService
+                                            .removeMovie(item.movie),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black87,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.close,
+                                            color: Colors.white70,
+                                            size: 14,
                                           ),
                                         ),
                                       ),
+                                    ),
                                     Positioned(
-                                      left: 0,
-                                      right: 0,
-                                      bottom: 4,
+                                      left: 6,
+                                      bottom: 10,
                                       child: Container(
-                                        padding: const EdgeInsets.fromLTRB(
-                                            6, 16, 6, 4),
-                                        decoration: const BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: [
-                                              Colors.transparent,
-                                              Colors.black87,
-                                            ],
-                                          ),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black87,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
                                         ),
                                         child: Text(
-                                          '${movie.title} ($badge)',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                          subtitle,
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 10.5,

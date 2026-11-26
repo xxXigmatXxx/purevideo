@@ -160,26 +160,32 @@ class AccountsScreen extends StatelessWidget {
                                   ),
                                 )
                                 .value;
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              child: ListTile(
-                                leading: _buildServiceLogo(service),
-                                title: Text(loginLabel),
-                                subtitle: Text(service.displayName),
-                                trailing: IconButton(
-                                  icon: Icon(
-                                    isPasswordless
-                                        ? Icons.visibility_off_outlined
-                                        : Icons.delete,
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: TvFocusable(
+                                borderRadius: BorderRadius.circular(12),
+                                focusScale: 1.01,
+                                onTap: () {
+                                  context.read<AccountsBloc>().add(
+                                        SignOutRequested(service),
+                                      );
+                                },
+                                child: Card(
+                                  margin: EdgeInsets.zero,
+                                  child: ListTile(
+                                    leading: _buildServiceLogo(service),
+                                    title: Text(loginLabel),
+                                    subtitle: Text(
+                                      isPasswordless
+                                          ? '${service.displayName} • kliknij, aby wyłączyć'
+                                          : '${service.displayName} • kliknij, aby wylogować',
+                                    ),
+                                    trailing: Icon(
+                                      isPasswordless
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.delete_outline,
+                                    ),
                                   ),
-                                  tooltip: isPasswordless
-                                      ? 'Wyłącz źródło'
-                                      : 'Wyloguj',
-                                  onPressed: () {
-                                    context.read<AccountsBloc>().add(
-                                          SignOutRequested(service),
-                                        );
-                                  },
                                 ),
                               ),
                             );

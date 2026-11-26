@@ -9,20 +9,25 @@ import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/global/widgets/error_view.dart';
 import 'package:purevideo/presentation/global/widgets/poster_image.dart';
+import 'package:purevideo/presentation/global/widgets/purevideo_logo.dart';
 import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
 import 'package:purevideo/presentation/search/bloc/search_block.dart';
 import 'package:purevideo/presentation/search/bloc/search_event.dart';
 import 'package:purevideo/presentation/search/bloc/search_state.dart';
 
-const Color _kNetflixRed = Color(0xFFE50914);
+const Color _kNetflixRed = kPureVideoRed;
 
 class SearchScreen extends StatelessWidget {
   const SearchScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final isWide = DeviceUtils.isWideLayout(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Szukaj'), centerTitle: true),
+      backgroundColor: const Color(0xFF0A0A0D),
+      appBar: isWide
+          ? null
+          : AppBar(title: const Text('Szukaj'), centerTitle: true),
       body: BlocProvider(
         create: (context) => SearchBloc(),
         child: const SearchScreenContent(),
@@ -39,13 +44,13 @@ class SearchMovieTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(8),
       onTap: () => context.pushNamed(
         'movie_details_plain',
         extra: movie,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -55,25 +60,10 @@ class SearchMovieTile extends StatelessWidget {
               fallbacks: movie.fallbackPosterCandidates,
               title: movie.title,
             ),
-            Positioned(
+            const Positioned(
               top: 6,
               left: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(160),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: const Text(
-                  'P',
-                  style: TextStyle(
-                    color: _kNetflixRed,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                    height: 1.1,
-                  ),
-                ),
-              ),
+              child: PureVideoPosterBadge(size: 12),
             ),
             Positioned(
               left: 0,
@@ -153,21 +143,27 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
     final suggested = getIt<MergeService>().getMovies.isNotEmpty
         ? getIt<MergeService>().getMovies
         : getIt<SettingsService>().getCachedHomeMovies();
-
+    final isWide = DeviceUtils.isWideLayout(context);
     final width = MediaQuery.sizeOf(context).width;
     final int crossAxisCount =
         width > 1100 ? 6 : (width > 760 ? 5 : (width > 560 ? 4 : 3));
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(
+        isWide ? 28 : 16,
+        isWide ? 14 : 16,
+        isWide ? 28 : 16,
+        28,
+      ),
       children: [
         Row(
           children: [
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1F1F1F),
-                  borderRadius: BorderRadius.circular(10),
+                  color: const Color(0xFF1A1A20),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
                 ),
                 child: TextField(
                   controller: _searchController,
@@ -184,59 +180,56 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                       Icons.search,
                       color: Colors.white70,
                     ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 14),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
-                            icon:
-                                const Icon(Icons.clear, color: Colors.white70),
+                            icon: const Icon(Icons.clear,
+                                color: Colors.white70),
                             onPressed: () {
                               _searchController.clear();
                               _onSearchChanged('');
                             },
                           )
                         : null,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: false,
                   ),
                 ),
               ),
             ),
-            if (DeviceUtils.isWideLayout(context)) ...[
-              const SizedBox(width: 10),
-              TvFocusable(
-                borderRadius: BorderRadius.circular(10),
-                onTap: _submitSearch,
-                child: Container(
-                  height: 48,
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  decoration: BoxDecoration(
-                    color: _kNetflixRed,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  alignment: Alignment.center,
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.search, color: Colors.white, size: 20),
-                      SizedBox(width: 6),
-                      Text(
-                        'Szukaj',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
+            const SizedBox(width: 10),
+            TvFocusable(
+              borderRadius: BorderRadius.circular(12),
+              focusScale: 1.04,
+              onTap: _submitSearch,
+              child: Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                decoration: BoxDecoration(
+                  color: _kNetflixRed,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.search, color: Colors.white, size: 20),
+                    SizedBox(width: 6),
+                    Text(
+                      'Szukaj',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
         BlocBuilder<SearchBloc, SearchState>(
           builder: (context, state) {
             if (state is SearchInitial) {
@@ -247,6 +240,7 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                     child: Text(
                       'Wpisz tytuł, aby wyszukać filmy i seriale z dostępnymi linkami',
                       textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
                 );
@@ -259,7 +253,8 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                     child: Text(
                       'Polecane i popularne w PureVideo',
                       style: TextStyle(
-                        fontSize: 17,
+                        color: Colors.white,
+                        fontSize: 18,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -270,8 +265,8 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
                       childAspectRatio: 0.67,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
                     ),
                     itemCount: suggested.take(24).length,
                     itemBuilder: (context, index) {
@@ -305,6 +300,7 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                     child: Text(
                       'Brak tytułów z aktywnymi linkami dla podanej frazy',
                       textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
                 );
@@ -315,8 +311,8 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   childAspectRatio: 0.67,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
                 ),
                 itemCount: state.results.length,
                 itemBuilder: (context, index) {

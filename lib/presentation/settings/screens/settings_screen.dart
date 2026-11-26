@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/app_update_service.dart';
-import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
+import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
+import 'package:purevideo/core/utils/device_utils.dart';
 import 'package:purevideo/di/injection_container.dart';
+import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/presentation/settings/widgets/owner_auth_dialog.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_item.dart';
 import 'package:purevideo/presentation/settings/widgets/settings_listenable.dart';
@@ -22,10 +23,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = DeviceUtils.isWideLayout(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Ustawienia'), centerTitle: true),
+      backgroundColor: isWide ? const Color(0xFF0A0A0D) : null,
+      appBar: isWide
+          ? null
+          : AppBar(title: const Text('Ustawienia'), centerTitle: true),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.symmetric(
+          horizontal: isWide ? 48 : 16,
+          vertical: isWide ? 18 : 16,
+        ),
         children: [
           SettingsSection(
             title: 'Konta',
@@ -79,7 +87,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SettingsItem(
                 icon: Icons.palette_outlined,
                 title: 'Motywy',
-                subtitle: 'Styl interfejsu (Netflix / Oryginalny) oraz ikona i nazwa aplikacji',
+                subtitle:
+                    'Styl interfejsu (Netflix / Oryginalny) oraz ikona i nazwa aplikacji',
                 onTap: () {
                   context.pushNamed('theme');
                 },
@@ -91,8 +100,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? 'Dostępna nowa wersja: v${getIt<AppUpdateService>().availableUpdate.value!.version}'
                     : 'Sprawdź dostępność nowej wersji aplikacji',
                 onTap: () async {
-                  final upd =
-                      await getIt<AppUpdateService>().checkForUpdates(force: true);
+                  final upd = await getIt<AppUpdateService>()
+                      .checkForUpdates(force: true);
                   if (!context.mounted) return;
                   if (upd != null) {
                     await AppUpdateDialog.show(context, upd);
@@ -136,13 +145,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 !_settingsService.isDebugVisible);
                           });
                         },
-                        trailing: Switch(
-                          value: _settingsService.isDebugVisible,
-                          onChanged: (value) {
-                            setState(() {
-                              _settingsService.setDebugVisible(value);
-                            });
-                          },
+                        trailing: ExcludeFocus(
+                          child: Switch(
+                            value: _settingsService.isDebugVisible,
+                            onChanged: (value) {
+                              setState(() {
+                                _settingsService.setDebugVisible(value);
+                              });
+                            },
+                          ),
                         ),
                       ),
                       SettingsItem(

@@ -3,12 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
-import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
+import 'package:purevideo/core/utils/tv_nav_controller.dart';
 import 'package:purevideo/di/injection_container.dart';
+import 'package:purevideo/presentation/global/widgets/purevideo_logo.dart';
+import 'package:purevideo/presentation/global/widgets/tv_focusable.dart';
+import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 
 class MainScreen extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
+
   const MainScreen({super.key, required this.navigationShell});
 
   @override
@@ -17,6 +21,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _dismissedBanner = false;
+  final TvNavController _tvNav = TvNavController.instance;
 
   Widget _buildUpdateBanner(BuildContext context) {
     return ValueListenableBuilder<AppUpdateInfo?>(
@@ -30,11 +35,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           color: isDev ? const Color(0xFF4A3800) : const Color(0xFFB71C1C),
           child: SafeArea(
             bottom: false,
-            child: InkWell(
+            child: TvFocusable(
+              borderRadius: BorderRadius.zero,
+              focusScale: 1.0,
               onTap: () => AppUpdateDialog.show(context, update),
               child: Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
                     Icon(
@@ -90,13 +97,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _onSelectBranch(int index) {
-    if (index == widget.navigationShell.currentIndex) return;
-    HapticFeedback.mediumImpact();
-    widget.navigationShell.goBranch(
-      index,
-      initialLocation: false,
-    );
+  void _onSelectBranch(int index, {HomeTabFilter? homeFilter}) {
+    if (homeFilter != null) {
+      _tvNav.homeFilter.value = homeFilter;
+    }
+    if (index == 0) {
+      _tvNav.scrollHomeToTop?.call();
+    }
+    if (index != widget.navigationShell.currentIndex) {
+      HapticFeedback.selectionClick();
+      widget.navigationShell.goBranch(
+        index,
+        initialLocation: false,
+      );
+    }
   }
 
   @override
@@ -105,29 +119,55 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final currentIndex = widget.navigationShell.currentIndex;
 
     return PopScope(
-      canPop: currentIndex == 0,
+      canPop: !isWide && currentIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && currentIndex != 0) {
+        if (didPop) return;
+        if (isWide) {
+          if (currentIndex != 0) {
+            _onSelectBranch(0, homeFilter: HomeTabFilter.all);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _tvNav.focusActiveTopNav(0);
+            });
+            return;
+          }
+          if (!_tvNav.isTopNavFocused()) {
+            _tvNav.scrollHomeToTop?.call();
+            _tvNav.focusActiveTopNav(0);
+            return;
+          }
+          // Already at top bar on Home -> allow exit
+          SystemNavigator.pop();
+        } else if (currentIndex != 0) {
           _onSelectBranch(0);
         }
       },
       child: isWide
           ? Scaffold(
-              backgroundColor: Colors.black,
-              body: Row(
+              backgroundColor: const Color(0xFF0A0A0D),
+              body: Column(
                 children: [
-                  _TvSideNavigationRail(
-                    currentIndex: currentIndex,
-                    onTap: _onSelectBranch,
+                  _buildUpdateBanner(context),
+                  ValueListenableBuilder<HomeTabFilter>(
+                    valueListenable: _tvNav.homeFilter,
+                    builder: (context, homeFilter, _) {
+                      return _TvTopNavigationBar(
+                        currentIndex: currentIndex,
+                        homeFilter: homeFilter,
+                        tvNav: _tvNav,
+                        onSelectSearch: () => _onSelectBranch(1),
+                        onSelectHome: () =>
+                            _onSelectBranch(0, homeFilter: HomeTabFilter.all),
+                        onSelectSeries: () => _onSelectBranch(0,
+                            homeFilter: HomeTabFilter.series),
+                        onSelectMovies: () => _onSelectBranch(0,
+                            homeFilter: HomeTabFilter.movies),
+                        onSelectMyList: () => _onSelectBranch(2),
+                        onSelectSettings: () => _onSelectBranch(3),
+                        onOpenAccounts: () => context.pushNamed('accounts'),
+                      );
+                    },
                   ),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        _buildUpdateBanner(context),
-                        Expanded(child: widget.navigationShell),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: widget.navigationShell),
                 ],
               ),
             )
@@ -140,76 +180,172 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ),
               bottomNavigationBar: _CustomBottomNavigationBar(
                 currentIndex: currentIndex,
-                onTap: _onSelectBranch,
+                onTap: (i) => _onSelectBranch(i),
               ),
             ),
     );
   }
 }
 
-class _TvSideNavigationRail extends StatelessWidget {
+class _TvTopNavigationBar extends StatelessWidget {
   final int currentIndex;
-  final ValueChanged<int> onTap;
+  final HomeTabFilter homeFilter;
+  final TvNavController tvNav;
+  final VoidCallback onSelectSearch;
+  final VoidCallback onSelectHome;
+  final VoidCallback onSelectSeries;
+  final VoidCallback onSelectMovies;
+  final VoidCallback onSelectMyList;
+  final VoidCallback onSelectSettings;
+  final VoidCallback onOpenAccounts;
 
-  const _TvSideNavigationRail({
+  const _TvTopNavigationBar({
     required this.currentIndex,
-    required this.onTap,
+    required this.homeFilter,
+    required this.tvNav,
+    required this.onSelectSearch,
+    required this.onSelectHome,
+    required this.onSelectSeries,
+    required this.onSelectMovies,
+    required this.onSelectMyList,
+    required this.onSelectSettings,
+    required this.onOpenAccounts,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 92,
+      height: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 28),
       decoration: const BoxDecoration(
-        color: Color(0xFF0D0D0D),
-        border: Border(
-          right: BorderSide(color: Color(0xFF262626), width: 0.8),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF0A0A0D),
+            Color(0xE80A0A0D),
+            Color(0x880A0A0D),
+          ],
         ),
       ),
-      child: SafeArea(
-        child: Column(
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Row(
           children: [
-            const SizedBox(height: 16),
-            const Text(
-              'P',
-              style: TextStyle(
-                color: Color(0xFFE50914),
-                fontSize: 34,
-                fontWeight: FontWeight.w900,
+            // Left: Profile / Konta switcher
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(0),
+              child: TvFocusable(
+                borderRadius: BorderRadius.circular(10),
+                focusScale: 1.04,
+                ensureVisibleOnFocus: false,
+                onTap: onOpenAccounts,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [kPureVideoRed, Color(0xFF7D0008)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: const Icon(
+                          Icons.person_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 24),
-            _SideNavItem(
-              icon: Icons.home_outlined,
-              activeIcon: Icons.home_filled,
-              label: 'Główna',
-              isSelected: currentIndex == 0,
-              onTap: () => onTap(0),
+            const Spacer(),
+            // Center: Floating Netflix-style Pill Nav Bar
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(1),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavSearchNode,
+                    icon: Icons.search_rounded,
+                    isSelected: currentIndex == 1,
+                    onTap: onSelectSearch,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(2),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavHomeNode,
+                    label: 'Główna',
+                    isSelected:
+                        currentIndex == 0 && homeFilter == HomeTabFilter.all,
+                    onTap: onSelectHome,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(3),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavSeriesNode,
+                    label: 'Seriale',
+                    isSelected:
+                        currentIndex == 0 && homeFilter == HomeTabFilter.series,
+                    onTap: onSelectSeries,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(4),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavMoviesNode,
+                    label: 'Filmy',
+                    isSelected:
+                        currentIndex == 0 && homeFilter == HomeTabFilter.movies,
+                    onTap: onSelectMovies,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(5),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavMyListNode,
+                    label: 'Moja lista',
+                    isSelected: currentIndex == 2,
+                    onTap: onSelectMyList,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(6),
+                  child: _TopNavPill(
+                    focusNode: tvNav.topNavSettingsNode,
+                    label: 'Ustawienia',
+                    isSelected: currentIndex == 3,
+                    onTap: onSelectSettings,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            _SideNavItem(
-              icon: Icons.search_outlined,
-              activeIcon: Icons.search,
-              label: 'Szukaj',
-              isSelected: currentIndex == 1,
-              onTap: () => onTap(1),
-            ),
-            const SizedBox(height: 12),
-            _SideNavItem(
-              icon: Icons.video_library_outlined,
-              activeIcon: Icons.video_library,
-              label: 'Moje',
-              isSelected: currentIndex == 2,
-              onTap: () => onTap(2),
-            ),
-            const SizedBox(height: 12),
-            _SideNavItem(
-              icon: Icons.settings_outlined,
-              activeIcon: Icons.settings,
-              label: 'Ustawienia',
-              isSelected: currentIndex == 3,
-              onTap: () => onTap(3),
-            ),
+            const Spacer(),
+            // Right: Unified PureVideo Wordmark matching icon & TV banner 1:1
+            const PureVideoWordmark(height: 24),
           ],
         ),
       ),
@@ -217,84 +353,86 @@ class _TvSideNavigationRail extends StatelessWidget {
   }
 }
 
-class _SideNavItem extends StatefulWidget {
-  final IconData icon;
-  final IconData activeIcon;
-  final String label;
+class _TopNavPill extends StatefulWidget {
+  final FocusNode? focusNode;
+  final IconData? icon;
+  final String? label;
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _SideNavItem({
-    required this.icon,
-    required this.activeIcon,
-    required this.label,
+  const _TopNavPill({
+    this.focusNode,
+    this.icon,
+    this.label,
     required this.isSelected,
     required this.onTap,
   });
 
   @override
-  State<_SideNavItem> createState() => _SideNavItemState();
+  State<_TopNavPill> createState() => _TopNavPillState();
 }
 
-class _SideNavItemState extends State<_SideNavItem> {
+class _TopNavPillState extends State<_TopNavPill> {
   bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = Colors.white;
-    final inactiveColor = Colors.white.withAlpha(140);
+    final bgColor = _focused
+        ? Colors.white.withAlpha(64)
+        : (widget.isSelected
+            ? Colors.white.withAlpha(42)
+            : Colors.transparent);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        focusNode: widget.focusNode,
         onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(999),
         onFocusChange: (f) {
           if (mounted) setState(() => _focused = f);
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          width: 76,
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          decoration: BoxDecoration(
-            color: _focused
-                ? Colors.white.withAlpha(34)
-                : (widget.isSelected
-                    ? const Color(0xFFE50914).withAlpha(35)
-                    : Colors.transparent),
-            borderRadius: BorderRadius.circular(12),
-            border: _focused
-                ? Border.all(color: Colors.white, width: 2)
-                : (widget.isSelected
-                    ? Border.all(
-                        color: const Color(0xFFE50914).withAlpha(140),
-                        width: 1,
-                      )
-                    : null),
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.symmetric(
+            horizontal: widget.icon != null && widget.label == null ? 14 : 18,
+            vertical: 8,
           ),
-          child: Column(
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: _focused ? Colors.white : Colors.transparent,
+              width: 2.0,
+            ),
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                widget.isSelected ? widget.activeIcon : widget.icon,
-                size: 24,
-                color: widget.isSelected || _focused
-                    ? activeColor
-                    : inactiveColor,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight:
-                      widget.isSelected ? FontWeight.w700 : FontWeight.w500,
+              if (widget.icon != null)
+                Icon(
+                  widget.icon,
+                  size: 20,
                   color: widget.isSelected || _focused
-                      ? activeColor
-                      : inactiveColor,
+                      ? Colors.white
+                      : Colors.white70,
                 ),
-              ),
+              if (widget.icon != null && widget.label != null)
+                const SizedBox(width: 6),
+              if (widget.label != null)
+                Text(
+                  widget.label!,
+                  style: TextStyle(
+                    color: widget.isSelected || _focused
+                        ? Colors.white
+                        : Colors.white70,
+                    fontSize: 14.5,
+                    fontWeight: widget.isSelected || _focused
+                        ? FontWeight.w700
+                        : FontWeight.w500,
+                  ),
+                ),
             ],
           ),
         ),
@@ -305,7 +443,8 @@ class _SideNavItemState extends State<_SideNavItem> {
 
 class _CustomBottomNavigationBar extends StatelessWidget {
   final int currentIndex;
-  final Function(int) onTap;
+  final ValueChanged<int> onTap;
+
   const _CustomBottomNavigationBar({
     required this.currentIndex,
     required this.onTap,
@@ -314,46 +453,52 @@ class _CustomBottomNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF121212),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
         border: Border(
-          top: BorderSide(color: Color(0xFF262626), width: 0.6),
+          top: BorderSide(
+            color: Colors.white.withAlpha(20),
+            width: 0.6,
+          ),
         ),
       ),
-      height: 60 + MediaQuery.of(context).padding.bottom,
       child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _NavBarItem(
-              icon: Icons.home_outlined,
-              activeIcon: Icons.home_filled,
-              label: 'Strona główna',
-              isSelected: currentIndex == 0,
-              onTap: () => onTap(0),
-            ),
-            _NavBarItem(
-              icon: Icons.search_outlined,
-              activeIcon: Icons.search,
-              label: 'Szukaj',
-              isSelected: currentIndex == 1,
-              onTap: () => onTap(1),
-            ),
-            _NavBarItem(
-              icon: Icons.video_library_outlined,
-              activeIcon: Icons.video_library,
-              label: 'Moje PureVideo',
-              isSelected: currentIndex == 2,
-              onTap: () => onTap(2),
-            ),
-            _NavBarItem(
-              icon: Icons.settings_outlined,
-              activeIcon: Icons.settings,
-              label: 'Ustawienia',
-              isSelected: currentIndex == 3,
-              onTap: () => onTap(3),
-            ),
-          ],
+        top: false,
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _NavBarItem(
+                icon: Icons.home_outlined,
+                activeIcon: Icons.home_filled,
+                label: 'Główna',
+                isSelected: currentIndex == 0,
+                onTap: () => onTap(0),
+              ),
+              _NavBarItem(
+                icon: Icons.search_outlined,
+                activeIcon: Icons.search,
+                label: 'Szukaj',
+                isSelected: currentIndex == 1,
+                onTap: () => onTap(1),
+              ),
+              _NavBarItem(
+                icon: Icons.video_library_outlined,
+                activeIcon: Icons.video_library,
+                label: 'Moje PureVideo',
+                isSelected: currentIndex == 2,
+                onTap: () => onTap(2),
+              ),
+              _NavBarItem(
+                icon: Icons.settings_outlined,
+                activeIcon: Icons.settings,
+                label: 'Ustawienia',
+                isSelected: currentIndex == 3,
+                onTap: () => onTap(3),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -386,6 +531,7 @@ class _NavBarItemState extends State<_NavBarItem> {
   Widget build(BuildContext context) {
     final activeColor = Colors.white;
     final inactiveColor = Colors.white.withAlpha(130);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(

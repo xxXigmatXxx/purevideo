@@ -32,6 +32,7 @@ import 'package:purevideo/data/repositories/bajeczki/bajeczki_auth_repository.da
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_movie_repository.dart';
 import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/app_update_service.dart';
+import 'package:purevideo/core/services/tv_preview_service.dart';
 import 'package:purevideo/data/repositories/bajeczki/bajeczki_search_repository.dart';
 import 'package:purevideo/data/repositories/custom/custom_auth_repository.dart';
 import 'package:purevideo/data/repositories/custom/custom_movie_repository.dart';
@@ -65,6 +66,7 @@ void setupInjection() {
   getIt.registerSingleton<WatchedService>(WatchedService());
 
   getIt.registerSingleton<FilmwebInfoRepository>(FilmwebInfoRepository());
+  getIt.registerSingleton<TvPreviewService>(TvPreviewService(getIt<FilmwebInfoRepository>()));
 
   getIt.registerSingleton<Map<SupportedService, AuthRepository>>({
     SupportedService.filman: FilmanAuthRepository(),
