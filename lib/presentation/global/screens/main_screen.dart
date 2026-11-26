@@ -24,6 +24,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   String? _autoPromptedUpdateId;
   final TvNavController _tvNav = TvNavController.instance;
 
+  bool _hasVisibleUpdateBanner() {
+    return getIt<AppUpdateService>().availableUpdate.value != null &&
+        !_dismissedBanner;
+  }
+
   Widget _buildUpdateBanner(BuildContext context) {
     return ValueListenableBuilder<AppUpdateInfo?>(
       valueListenable: getIt<AppUpdateService>().availableUpdate,
@@ -36,41 +41,70 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           color: isDev ? const Color(0xFF4A3800) : const Color(0xFFB71C1C),
           child: SafeArea(
             bottom: false,
-            child: TvFocusable(
-              borderRadius: BorderRadius.zero,
-              focusScale: 1.0,
-              onTap: () => AppUpdateDialog.show(context, update),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.system_update,
-                      color: isDev ? Colors.amberAccent : Colors.white,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Dostępna nowa wersja: ${update.name} (v${update.version}) • Kliknij aby pobrać',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TvFocusable(
+                      focusNode: _tvNav.updateBannerNode,
+                      ensureVisibleOnFocus: false,
+                      focusScale: 1.0,
+                      focusBorderColor: Colors.white,
+                      focusBorderWidth: 2.5,
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => AppUpdateDialog.show(context, update),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.system_update,
+                              color: isDev ? Colors.amberAccent : Colors.white,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Dostępna nowa wersja: ${update.name} (v${update.version}) • Kliknij aby pobrać',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close,
-                          color: Colors.white70, size: 18),
-                      onPressed: () => setState(() => _dismissedBanner = true),
+                  ),
+                  const SizedBox(width: 6),
+                  TvFocusable(
+                    focusNode: _tvNav.updateBannerCloseNode,
+                    ensureVisibleOnFocus: false,
+                    focusScale: 1.0,
+                    focusBorderColor: Colors.white,
+                    focusBorderWidth: 2.0,
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      final idx = widget.navigationShell.currentIndex;
+                      setState(() => _dismissedBanner = true);
+                      _tvNav.focusActiveTopNav(idx);
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.close,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -117,19 +151,131 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _focusActiveTabContent(int index) {
+    switch (index) {
+      case 1:
+        if (_tvNav.searchInputNode.canRequestFocus) {
+          _tvNav.searchInputNode.requestFocus();
+        } else if (_tvNav.searchButtonNode.canRequestFocus) {
+          _tvNav.searchButtonNode.requestFocus();
+        }
+        break;
+      case 2:
+        if (_tvNav.myListFirstNode.canRequestFocus) {
+          _tvNav.myListFirstNode.requestFocus();
+        }
+        break;
+      case 3:
+        if (_tvNav.settingsFirstNode.canRequestFocus) {
+          _tvNav.settingsFirstNode.requestFocus();
+        }
+        break;
+      case 0:
+      default:
+        _tvNav.focusHomeTab?.call();
+        break;
+    }
+  }
+
+  Object? _handleTvDirectionalFocus(
+      DirectionalFocusIntent intent, int currentIndex) {
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null) {
+      _tvNav.focusActiveTopNav(currentIndex);
+      return null;
+    }
+
+    // 1. Update banner navigation
+    if (_tvNav.isUpdateBannerFocused()) {
+      switch (intent.direction) {
+        case TraversalDirection.down:
+          _tvNav.focusActiveTopNav(currentIndex);
+          return null;
+        case TraversalDirection.right:
+          if (_tvNav.updateBannerNode.hasFocus &&
+              _tvNav.updateBannerCloseNode.canRequestFocus) {
+            _tvNav.updateBannerCloseNode.requestFocus();
+          }
+          return null;
+        case TraversalDirection.left:
+          if (_tvNav.updateBannerCloseNode.hasFocus &&
+              _tvNav.updateBannerNode.canRequestFocus) {
+            _tvNav.updateBannerNode.requestFocus();
+          }
+          return null;
+        case TraversalDirection.up:
+          return null;
+      }
+    }
+
+    // 2. Top Navigation Bar (Accounts, Szukaj, Główna, Seriale, Filmy, Moja lista, Ustawienia)
+    if (_tvNav.isTopNavFocused()) {
+      final nodes = _tvNav.orderedTopNavNodes;
+      final idx = nodes.indexWhere((n) => n.hasFocus);
+      switch (intent.direction) {
+        case TraversalDirection.left:
+          if (idx > 0 && nodes[idx - 1].canRequestFocus) {
+            nodes[idx - 1].requestFocus();
+          }
+          return null;
+        case TraversalDirection.right:
+          if (idx >= 0 &&
+              idx < nodes.length - 1 &&
+              nodes[idx + 1].canRequestFocus) {
+            nodes[idx + 1].requestFocus();
+          }
+          return null;
+        case TraversalDirection.up:
+          if (_hasVisibleUpdateBanner() &&
+              _tvNav.updateBannerNode.canRequestFocus) {
+            _tvNav.updateBannerNode.requestFocus();
+          }
+          return null;
+        case TraversalDirection.down:
+          _focusActiveTabContent(currentIndex);
+          return null;
+      }
+    }
+
+    // 3. Inside tab content (nested Navigator FocusScope):
+    // Try standard traversal inside tab; if UP hits top edge, jump cleanly to Top Nav!
+    final moved = primary.focusInDirection(intent.direction);
+    if (!moved && intent.direction == TraversalDirection.up) {
+      if (currentIndex == 0 && (_tvNav.handleHomeUpAtEdge?.call() ?? false)) {
+        return null;
+      }
+      _tvNav.focusActiveTopNav(currentIndex);
+    }
+    return null;
+  }
+
   void _onSelectBranch(int index, {HomeTabFilter? homeFilter}) {
+    final wasSameBranch = index == widget.navigationShell.currentIndex;
+    final prevFilter = _tvNav.homeFilter.value;
     if (homeFilter != null) {
       _tvNav.homeFilter.value = homeFilter;
     }
+    final isSameView =
+        wasSameBranch && (homeFilter == null || prevFilter == homeFilter);
     if (index == 0) {
       _tvNav.scrollHomeToTop?.call();
     }
-    if (index != widget.navigationShell.currentIndex) {
+    if (!wasSameBranch) {
       HapticFeedback.selectionClick();
       widget.navigationShell.goBranch(
         index,
         initialLocation: false,
       );
+      if (DeviceUtils.isTv && index != 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focusActiveTabContent(index);
+        });
+      }
+    } else if (DeviceUtils.isTv && isSameView) {
+      // Pressing OK on the already-selected pill moves focus into its content
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusActiveTabContent(index);
+      });
     }
   }
 
@@ -143,6 +289,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         if (isWide) {
+          if (_tvNav.isUpdateBannerFocused()) {
+            _tvNav.focusActiveTopNav(currentIndex);
+            return;
+          }
           if (currentIndex != 0) {
             _onSelectBranch(0, homeFilter: HomeTabFilter.all);
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -164,9 +314,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       child: isWide
           ? Scaffold(
               backgroundColor: const Color(0xFF0A0A0D),
-              body: Column(
-                children: [
-                  _buildUpdateBanner(context),
+              body: Actions(
+                actions: <Type, Action<Intent>>{
+                  DirectionalFocusIntent:
+                      CallbackAction<DirectionalFocusIntent>(
+                    onInvoke: (intent) =>
+                        _handleTvDirectionalFocus(intent, currentIndex),
+                  ),
+                },
+                child: Column(
+                  children: [
+                    _buildUpdateBanner(context),
                   ValueListenableBuilder<HomeTabFilter>(
                     valueListenable: _tvNav.homeFilter,
                     builder: (context, homeFilter, _) {
@@ -189,6 +347,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
                   Expanded(child: widget.navigationShell),
                 ],
+                ),
               ),
             )
           : Scaffold(
@@ -256,6 +415,7 @@ class _TvTopNavigationBar extends StatelessWidget {
             FocusTraversalOrder(
               order: const NumericFocusOrder(0),
               child: TvFocusable(
+                focusNode: tvNav.topNavAccountsNode,
                 borderRadius: BorderRadius.circular(10),
                 focusScale: 1.04,
                 ensureVisibleOnFocus: false,

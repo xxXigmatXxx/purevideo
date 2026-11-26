@@ -4,6 +4,7 @@ import 'package:purevideo/core/services/merg_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/services/watched_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
+import 'package:purevideo/core/utils/tv_nav_controller.dart';
 import 'package:purevideo/data/models/movie_model.dart';
 import 'package:purevideo/data/models/watched_model.dart';
 import 'package:purevideo/di/injection_container.dart';
@@ -137,6 +138,8 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                       SliverToBoxAdapter(
                         child: TvExpandableMovieRow(
                           title: 'Moja lista',
+                          firstItemFocusNode:
+                              TvNavController.instance.myListFirstNode,
                           autofocusFirst: true,
                           items: myList
                               .map((m) => TvExpandableRowItem(movie: m))
@@ -149,6 +152,9 @@ class _WatchedMoviesScreenState extends State<WatchedMoviesScreen> {
                       SliverToBoxAdapter(
                         child: TvExpandableMovieRow(
                           title: 'Kontynuuj oglądanie',
+                          firstItemFocusNode: myList.isEmpty
+                              ? TvNavController.instance.myListFirstNode
+                              : null,
                           autofocusFirst: myList.isEmpty,
                           items: watchedItems,
                           onItemLongPress: (rowItem) {

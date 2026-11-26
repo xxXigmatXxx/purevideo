@@ -4,6 +4,7 @@ import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/core/services/extra_sources_service.dart';
 import 'package:purevideo/core/services/settings_service.dart';
 import 'package:purevideo/core/utils/device_utils.dart';
+import 'package:purevideo/core/utils/tv_nav_controller.dart';
 import 'package:purevideo/di/injection_container.dart';
 import 'package:purevideo/presentation/settings/widgets/app_update_dialog.dart';
 import 'package:purevideo/presentation/settings/widgets/owner_auth_dialog.dart';
@@ -39,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Konta',
             items: [
               SettingsItem(
+                focusNode: TvNavController.instance.settingsFirstNode,
                 icon: Icons.person_outline,
                 title: 'Zarządzanie kontami',
                 subtitle: 'Dodaj lub usuń konta serwisów',
@@ -65,15 +67,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }
                       await context.pushNamed('extra_sources');
                     },
-                    trailing: Switch(
-                      value: _settingsService.extraSourcesEnabled,
-                      onChanged: (value) {
-                        _settingsService.setExtraSourcesEnabled(value);
-                        getIt<ExtraSourcesService>().notifyChanged();
-                        if (value) {
-                          getIt<ExtraSourcesService>().syncRemoteSources();
-                        }
-                      },
+                    trailing: ExcludeFocus(
+                      child: Switch(
+                        value: _settingsService.extraSourcesEnabled,
+                        onChanged: (value) {
+                          _settingsService.setExtraSourcesEnabled(value);
+                          getIt<ExtraSourcesService>().notifyChanged();
+                          if (value) {
+                            getIt<ExtraSourcesService>().syncRemoteSources();
+                          }
+                        },
+                      ),
                     ),
                   ),
                 ],

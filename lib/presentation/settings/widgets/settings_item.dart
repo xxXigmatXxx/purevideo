@@ -7,6 +7,7 @@ class SettingsItem extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   final Widget? trailing;
+  final FocusNode? focusNode;
 
   const SettingsItem({
     super.key,
@@ -15,11 +16,13 @@ class SettingsItem extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.trailing,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      focusNode: focusNode,
       borderRadius: BorderRadius.circular(8),
       focusScale: 1.01,
       onTap: onTap,

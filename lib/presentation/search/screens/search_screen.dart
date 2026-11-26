@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:purevideo/core/utils/tv_nav_controller.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:purevideo/core/services/merg_service.dart';
@@ -107,10 +109,46 @@ class SearchScreenContent extends StatefulWidget {
 
 class _SearchScreenContentState extends State<SearchScreenContent> {
   final TextEditingController _searchController = TextEditingController();
+  final TvNavController _tvNav = TvNavController.instance;
   Timer? _debounce;
 
   @override
+  void initState() {
+    super.initState();
+    _tvNav.searchInputNode.onKeyEvent = _onSearchInputKey;
+  }
+
+  KeyEventResult _onSearchInputKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (!DeviceUtils.isWideLayout(context)) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _tvNav.focusActiveTopNav(1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      FocusScope.of(context).focusInDirection(TraversalDirection.down);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      final sel = _searchController.selection;
+      if (_searchController.text.isEmpty ||
+          (sel.isValid && sel.extentOffset >= _searchController.text.length)) {
+        if (_tvNav.searchButtonNode.canRequestFocus) {
+          _tvNav.searchButtonNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
   void dispose() {
+    _tvNav.searchInputNode.onKeyEvent = null;
     _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -166,6 +204,7 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
                   border: Border.all(color: Colors.white12),
                 ),
                 child: TextField(
+                  focusNode: _tvNav.searchInputNode,
                   controller: _searchController,
                   autofocus: false,
                   textInputAction: TextInputAction.search,
@@ -199,6 +238,7 @@ class _SearchScreenContentState extends State<SearchScreenContent> {
             ),
             const SizedBox(width: 10),
             TvFocusable(
+              focusNode: _tvNav.searchButtonNode,
               borderRadius: BorderRadius.circular(12),
               focusScale: 1.04,
               onTap: _submitSearch,

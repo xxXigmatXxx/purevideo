@@ -39,6 +39,7 @@ class MovieListItem extends StatelessWidget {
   final String? bottomBadge;
   final int? topRank;
   final bool autofocus;
+  final FocusNode? focusNode;
 
   const MovieListItem({
     super.key,
@@ -46,11 +47,13 @@ class MovieListItem extends StatelessWidget {
     this.bottomBadge,
     this.topRank,
     this.autofocus = false,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      focusNode: focusNode,
       autofocus: autofocus,
       borderRadius: BorderRadius.circular(8),
       onTap: () => context.pushNamed(
@@ -219,10 +222,49 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     };
+    _tvNav.focusHomeTab = () {
+      if (_verticalScrollController.hasClients &&
+          _verticalScrollController.offset > 28) {
+        _verticalScrollController.jumpTo(0);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_tvNav.homeHeroPlayNode.canRequestFocus) {
+            _tvNav.homeHeroPlayNode.requestFocus();
+          } else if (_tvNav.homeGridFirstNode.canRequestFocus) {
+            _tvNav.homeGridFirstNode.requestFocus();
+          }
+        });
+        return;
+      }
+      if (_tvNav.homeHeroPlayNode.canRequestFocus) {
+        _tvNav.homeHeroPlayNode.requestFocus();
+      } else if (_tvNav.homeGridFirstNode.canRequestFocus) {
+        _tvNav.homeGridFirstNode.requestFocus();
+      }
+    };
+    _tvNav.handleHomeUpAtEdge = () {
+      if (_verticalScrollController.hasClients &&
+          _verticalScrollController.offset > 28) {
+        _verticalScrollController.jumpTo(0);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_tvNav.homeHeroPlayNode.canRequestFocus) {
+            _tvNav.homeHeroPlayNode.requestFocus();
+          } else if (_tvNav.homeGridFirstNode.canRequestFocus) {
+            _tvNav.homeGridFirstNode.requestFocus();
+          }
+        });
+        return true;
+      }
+      return false;
+    };
   }
 
   @override
   void dispose() {
+    _tvNav.scrollHomeToTop = null;
+    _tvNav.focusHomeTab = null;
+    _tvNav.handleHomeUpAtEdge = null;
     _tvNav.homeFilter.removeListener(_onTvNavFilterChanged);
     _verticalScrollController.dispose();
     super.dispose();
@@ -602,6 +644,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           itemCount: pool.length,
                           itemBuilder: (context, index) => RepaintBoundary(child: MovieListItem(
                             movie: pool[index],
+                            focusNode: index == 0 ? _tvNav.homeGridFirstNode : null,
                             autofocus: DeviceUtils.isTv && index == 0,
                           )),
                         ),
@@ -1137,6 +1180,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     runSpacing: 8,
                                     children: [
                                       TvFocusable(
+                                        focusNode: _tvNav.homeHeroPlayNode,
                                         autofocus: DeviceUtils.isTv,
                                         borderRadius:
                                             BorderRadius.circular(999),

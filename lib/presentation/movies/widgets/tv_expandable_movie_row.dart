@@ -33,6 +33,7 @@ class TvExpandableMovieRow extends StatefulWidget {
   final String title;
   final List<TvExpandableRowItem> items;
   final bool autofocusFirst;
+  final FocusNode? firstItemFocusNode;
   final ValueChanged<TvExpandableRowItem>? onItemLongPress;
 
   const TvExpandableMovieRow({
@@ -40,6 +41,7 @@ class TvExpandableMovieRow extends StatefulWidget {
     required this.title,
     required this.items,
     this.autofocusFirst = false,
+    this.firstItemFocusNode,
     this.onItemLongPress,
   });
 
@@ -193,6 +195,7 @@ class _TvExpandableMovieRowState extends State<TvExpandableMovieRow> {
                   final isSeries = _isSeriesMovie(item.movie);
 
                   return TvFocusable(
+                    focusNode: index == 0 ? widget.firstItemFocusNode : null,
                     autofocus: widget.autofocusFirst && index == 0,
                     ensureVisibleOnFocus: false,
                     focusScale: 1.0,
