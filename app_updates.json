@@ -1,4 +1,17 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-22T09:00:00Z"
+  "updatedAt": "2026-11-26T10:17:52Z",
+  "release": {
+    "id": "v1.0.102",
+    "name": "PureVideo v1.0.102 (Płynność + Nowe UI TV)",
+    "version": "1.0.102",
+    "buildNumber": 102,
+    "description": "Naprawiono zacinanie na telefonie i Android TV (szybkie łączenie katalogów, płynniejsze przewijanie bez ciężkiego rozmycia GPU), nowy układ TV i ujednolicone logo PureVideo.",
+    "channel": "release",
+    "sourceType": "release_asset",
+    "sourceLabel": "v1.0.102 • PureVideo-v1.0.102-b102.apk",
+    "downloadUrl": "https://github.com/xxXigmatXxx/purevideo/releases/download/v1.0.102/PureVideo-v1.0.102-b102.apk",
+    "isZip": false,
+    "publishedAt": "2026-11-26T10:17:52Z"
+  }
 }
