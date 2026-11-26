@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_cast_framework/cast.dart';
@@ -159,6 +158,43 @@ class _HomeScreenState extends State<HomeScreen> {
   _HomeFilter _selectedFilter = _HomeFilter.all;
   String? _selectedCategory;
   int _heroSeed = 0;
+
+  List<MovieModel>? _memoSource;
+  _HomeFilter? _memoFilter;
+  String? _memoCategory;
+  List<MovieModel> _memoAllUnique = const [];
+  List<String> _memoAllCategories = const [];
+  List<MovieModel> _memoPool = const [];
+  List<MovieModel> _memoTop10 = const [];
+  List<MapEntry<String, List<MovieModel>>> _memoGroupedEntries = const [];
+
+  void _ensureMemoized(List<MovieModel> sourceMovies) {
+    if (identical(_memoSource, sourceMovies) &&
+        _memoFilter == _selectedFilter &&
+        _memoCategory == _selectedCategory) {
+      return;
+    }
+    if (!identical(_memoSource, sourceMovies)) {
+      _memoAllUnique = _dedupeMovies(sourceMovies);
+      _memoAllCategories = _collectAllCategories(_memoAllUnique);
+    }
+    final filtered = _applyFilter(_memoAllUnique);
+    _memoPool = filtered.isNotEmpty ? filtered : _memoAllUnique;
+    final showTop10 = _selectedCategory == null && _memoPool.length >= 3;
+    _memoTop10 = showTop10 ? _memoPool.take(10).toList() : const [];
+    final excludeFromCategories = <String>{
+      if (_selectedCategory == null) ..._memoTop10.map(_movieDedupeKey),
+    };
+    final grouped = _groupByCategories(
+      _memoPool,
+      excludeKeys: excludeFromCategories,
+    );
+    _memoGroupedEntries =
+        grouped.entries.where((e) => e.value.isNotEmpty).toList();
+    _memoSource = sourceMovies;
+    _memoFilter = _selectedFilter;
+    _memoCategory = _selectedCategory;
+  }
 
   static const Set<String> _genericCategories = {
     'polecane dla ciebie',
@@ -502,8 +538,8 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             if (state is MoviesLoaded) {
-              final allUnique = _dedupeMovies(state.movies);
-              if (allUnique.isEmpty) {
+              _ensureMemoized(state.movies);
+              if (_memoAllUnique.isEmpty) {
                 return const Center(
                   child: Text(
                     'Brak dostępnych filmów',
@@ -512,28 +548,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               }
 
-              final allCategories = _collectAllCategories(allUnique);
-              final filteredMovies = _applyFilter(allUnique);
-              final pool =
-                  filteredMovies.isNotEmpty ? filteredMovies : allUnique;
+              final allCategories = _memoAllCategories;
+              final pool = _memoPool;
               final heroMovie = pool[_heroSeed % pool.length];
 
               if (isWide) {
                 _previewService.requestPreview(heroMovie);
               }
 
-              final showTop10 =
-                  _selectedCategory == null && pool.length >= 3;
-              final top10Movies =
-                  showTop10 ? pool.take(10).toList() : <MovieModel>[];
-              final excludeFromCategories = <String>{
-                if (_selectedCategory == null)
-                  ...top10Movies.map(_movieDedupeKey),
-              };
-              final grouped = _groupByCategories(
-                pool,
-                excludeKeys: excludeFromCategories,
-              );
+              final top10Movies = _memoTop10;
+              final showTop10 = top10Movies.isNotEmpty;
+              final groupedEntries = _memoGroupedEntries;
 
               return SettingsListenable(
                 builder: (context, box, _) {
@@ -575,10 +600,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             mainAxisSpacing: 12,
                           ),
                           itemCount: pool.length,
-                          itemBuilder: (context, index) => MovieListItem(
+                          itemBuilder: (context, index) => RepaintBoundary(child: MovieListItem(
                             movie: pool[index],
                             autofocus: DeviceUtils.isTv && index == 0,
-                          ),
+                          )),
                         ),
                       ),
                     );
@@ -598,6 +623,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         child: CustomScrollView(
                           controller: _verticalScrollController,
+                          cacheExtent: 400,
                           slivers: [
                             if (!isWide)
                               SliverToBoxAdapter(
@@ -666,39 +692,43 @@ class _HomeScreenState extends State<HomeScreen> {
                                         badgeText: 'Nowy sezon',
                                       ),
                               ),
-                            for (final entry in grouped.entries)
-                              if (entry.value.isNotEmpty)
-                                SliverToBoxAdapter(
-                                  child: isWide
-                                      ? TvExpandableMovieRow(
-                                          title: entry.key,
-                                          items: [
-                                            for (var i = 0;
-                                                i < entry.value.length;
-                                                i++)
-                                              TvExpandableRowItem(
-                                                movie: entry.value[i],
-                                                bottomBadge: entry.key
-                                                        .toLowerCase()
-                                                        .contains('nowe')
-                                                    ? 'Ostatnio dodany'
-                                                    : (i % 5 == 0
-                                                        ? 'Ostatnio dodany'
-                                                        : null),
-                                              ),
-                                          ],
-                                        )
-                                      : _buildHorizontalRow(
-                                          context,
-                                          title: entry.key,
-                                          movies: entry.value,
-                                          badgeText: entry.key
+                            SliverList.builder(
+                              itemCount: groupedEntries.length,
+                              itemBuilder: (context, rowIdx) {
+                                final entry = groupedEntries[rowIdx];
+                                if (isWide) {
+                                  return TvExpandableMovieRow(
+                                    key: ValueKey(entry.key),
+                                    title: entry.key,
+                                    items: [
+                                      for (var i = 0;
+                                          i < entry.value.length;
+                                          i++)
+                                        TvExpandableRowItem(
+                                          movie: entry.value[i],
+                                          bottomBadge: entry.key
                                                   .toLowerCase()
                                                   .contains('nowe')
                                               ? 'Ostatnio dodany'
-                                              : null,
+                                              : (i % 5 == 0
+                                                  ? 'Ostatnio dodany'
+                                                  : null),
                                         ),
-                                ),
+                                    ],
+                                  );
+                                }
+                                return _buildHorizontalRow(
+                                  context,
+                                  title: entry.key,
+                                  movies: entry.value,
+                                  badgeText: entry.key
+                                          .toLowerCase()
+                                          .contains('nowe')
+                                      ? 'Ostatnio dodany'
+                                      : null,
+                                );
+                              },
+                            ),
                             const SliverToBoxAdapter(
                               child: SizedBox(height: 84),
                             ),
@@ -956,54 +986,45 @@ class _HomeScreenState extends State<HomeScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: Colors.white.withAlpha(34), width: 1.0),
-              color: const Color(0xFF111116),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(140),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+              color: const Color(0xFF0E0E13),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  // Wide right-weighted visual backdrop
-                  Positioned.fill(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: FractionallySizedBox(
-                        widthFactor: 0.68,
-                        heightFactor: 1.0,
-                        child: PosterImage(
-                          url: movie.imageUrl,
-                          headers: movie.imageHeaders,
-                          fallbacks: movie.fallbackPosterCandidates,
-                          decodeWidth: 960,
-                          alignment: const Alignment(0, -0.25),
-                          title: movie.title,
+            child: RepaintBoundary(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Wide right-weighted visual backdrop (zero GPU blur for locked 60 FPS)
+                    Positioned.fill(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: FractionallySizedBox(
+                          widthFactor: 0.66,
+                          heightFactor: 1.0,
+                          child: PosterImage(
+                            url: movie.imageUrl,
+                            headers: movie.imageHeaders,
+                            fallbacks: movie.fallbackPosterCandidates,
+                            decodeWidth: 540,
+                            alignment: const Alignment(0, -0.22),
+                            title: movie.title,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  // Subtle ambient blur left bleed so there's no hard seam
-                  Positioned.fill(
-                    child: ImageFiltered(
-                      imageFilter: ImageFilter.blur(sigmaX: 34, sigmaY: 34),
-                      child: Opacity(
-                        opacity: 0.25,
-                        child: PosterImage(
-                          url: movie.imageUrl,
-                          headers: movie.imageHeaders,
-                          fallbacks: movie.fallbackPosterCandidates,
-                          decodeWidth: 320,
-                          title: movie.title,
+                    // Subtle crimson radial atmosphere on left (pure gradient, 0 cost)
+                    Container(
+                      decoration: const BoxDecoration(
+                        gradient: RadialGradient(
+                          center: Alignment(-0.85, -0.4),
+                          radius: 1.2,
+                          colors: [
+                            Color(0x28E50914),
+                            Color(0x000E0E13),
+                          ],
                         ),
                       ),
                     ),
-                  ),
                   // Deep cinematic left-to-right + bottom vignette
                   Container(
                     decoration: const BoxDecoration(
@@ -1274,7 +1295,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 10),
+        ),
+        const SizedBox(height: 10),
           // Minimal TV sub-controls row: Category Filter + Shuffle Hero
           Row(
             children: [

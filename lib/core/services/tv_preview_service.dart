@@ -16,7 +16,7 @@ class TvMoviePreview {
   });
 }
 
-/// Lightweight debounced + cached Filmweb metadata provider for TV Hero & Expandable Row preview.
+/// Lightweight debounced + single-hit Filmweb metadata cache for TV UI (zero network spam).
 class TvPreviewService extends ChangeNotifier {
   final FilmwebInfoRepository _filmwebRepo;
 
@@ -54,7 +54,7 @@ class TvPreviewService extends ChangeNotifier {
     }
 
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 220), () {
+    _debounce = Timer(const Duration(milliseconds: 450), () {
       _fetchPreview(movie, key);
     });
   }
@@ -66,7 +66,10 @@ class TvPreviewService extends ChangeNotifier {
     final isSeries = key.endsWith('|s');
     final cleanQuery = movie.title
         .replaceAll(RegExp(r'\(\d{4}\)'), '')
-        .replaceAll(RegExp(r'\b(PL|LEKTOR|NAPISY|DUBBING|HD|CAM|4K)\b', caseSensitive: false), '')
+        .replaceAll(
+            RegExp(r'\b(PL|LEKTOR|NAPISY|DUBBING|HD|CAM|4K)\b',
+                caseSensitive: false),
+            '')
         .trim();
 
     if (cleanQuery.isEmpty) {
@@ -75,16 +78,9 @@ class TvPreviewService extends ChangeNotifier {
     }
 
     try {
-      final hits = await _filmwebRepo
-          .searchMovie(cleanQuery, isSeries: isSeries)
+      final match = await _filmwebRepo
+          .searchTopPreview(cleanQuery, isSeries: isSeries)
           .timeout(const Duration(seconds: 4));
-
-      final match = hits.isNotEmpty
-          ? hits.firstWhere(
-              (h) => h.plot.trim().isNotEmpty,
-              orElse: () => hits.first,
-            )
-          : null;
 
       if (match != null) {
         _cache[key] = TvMoviePreview(
@@ -92,7 +88,7 @@ class TvPreviewService extends ChangeNotifier {
           plot: match.plot.trim(),
           originalTitle: match.originalTitle.trim(),
         );
-        if (_cache.length > 150) {
+        if (_cache.length > 120) {
           _cache.remove(_cache.keys.first);
         }
         notifyListeners();

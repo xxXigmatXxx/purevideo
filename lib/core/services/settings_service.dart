@@ -91,7 +91,7 @@ class SettingsService {
 
   void setCachedHomeMovies(List<MovieModel> movies) {
     try {
-      final encoded = jsonEncode(movies
+      final encoded = jsonEncode(movies.take(180)
           .map((m) => {
                 'services': m.services
                     

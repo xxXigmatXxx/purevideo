@@ -41,9 +41,7 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   Widget build(BuildContext context) {
-    Widget content = AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      curve: Curves.easeOut,
+    Widget content = Container(
       padding: widget.padding,
       foregroundDecoration: _isFocused
           ? BoxDecoration(
@@ -52,13 +50,6 @@ class _TvFocusableState extends State<TvFocusable> {
                 color: widget.focusBorderColor,
                 width: widget.focusBorderWidth,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: widget.focusBorderColor.withAlpha(80),
-                  blurRadius: 14,
-                  spreadRadius: 1,
-                ),
-              ],
             )
           : null,
       child: widget.child,
@@ -67,42 +58,44 @@ class _TvFocusableState extends State<TvFocusable> {
     if (widget.focusScale != 1.0) {
       content = AnimatedScale(
         scale: _isFocused ? widget.focusScale : 1.0,
-        duration: const Duration(milliseconds: 140),
+        duration: const Duration(milliseconds: 110),
         curve: Curves.easeOut,
         child: content,
       );
     }
 
-    return Material(
-      color: Colors.transparent,
-      borderRadius: widget.borderRadius,
-      child: InkWell(
-        focusNode: widget.focusNode,
-        autofocus: widget.autofocus,
+    return RepaintBoundary(
+      child: Material(
+        color: Colors.transparent,
         borderRadius: widget.borderRadius,
-        focusColor: Colors.white.withAlpha(20),
-        hoverColor: Colors.white.withAlpha(14),
-        onTap: widget.onTap,
-        onLongPress: widget.onLongPress,
-        onFocusChange: (focused) {
-          if (mounted) {
-            setState(() => _isFocused = focused);
-          }
-          widget.onFocusChange?.call(focused);
-          if (focused && widget.ensureVisibleOnFocus) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                Scrollable.ensureVisible(
-                  context,
-                  alignment: widget.ensureVisibleAlignment,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                );
-              }
-            });
-          }
-        },
-        child: content,
+        child: InkWell(
+          focusNode: widget.focusNode,
+          autofocus: widget.autofocus,
+          borderRadius: widget.borderRadius,
+          focusColor: Colors.white.withAlpha(18),
+          hoverColor: Colors.white.withAlpha(12),
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          onFocusChange: (focused) {
+            if (mounted) {
+              setState(() => _isFocused = focused);
+            }
+            widget.onFocusChange?.call(focused);
+            if (focused && widget.ensureVisibleOnFocus) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  Scrollable.ensureVisible(
+                    context,
+                    alignment: widget.ensureVisibleAlignment,
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
+            }
+          },
+          child: content,
+        ),
       ),
     );
   }

@@ -20,7 +20,7 @@ class PosterImage extends StatefulWidget {
     this.title,
     this.fit = BoxFit.cover,
     this.alignment = Alignment.topCenter,
-    this.decodeWidth = 360,
+    this.decodeWidth = 280,
   });
 
   static String normalizeUrl(String raw, {bool smallCard = true}) {
@@ -185,12 +185,15 @@ class _PosterImageState extends State<PosterImage> {
       null,
       MemoryImage(bytes),
     );
-    return Image(
-      image: provider,
-      fit: widget.fit,
-      alignment: widget.alignment,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) => _buildFallback(),
+    return RepaintBoundary(
+      child: Image(
+        image: provider,
+        fit: widget.fit,
+        alignment: widget.alignment,
+        filterQuality: FilterQuality.low,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _buildFallback(),
+      ),
     );
   }
 }

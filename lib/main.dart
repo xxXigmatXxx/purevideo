@@ -76,6 +76,10 @@ void main() async {
   }
 
   await DeviceUtils.init();
+  if (DeviceUtils.isTv) {
+    PaintingBinding.instance.imageCache.maximumSize = 160;
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 56 * 1024 * 1024;
+  }
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
