@@ -52,6 +52,25 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
     return super.close();
   }
 
+  bool _areMovieListsEqual(List<MovieModel> a, List<MovieModel> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      final sa = a[i].services;
+      final sb = b[i].services;
+      if (sa.length != sb.length) return false;
+      for (int j = 0; j < sa.length; j++) {
+        if (sa[j].service != sb[j].service ||
+            sa[j].url != sb[j].url ||
+            sa[j].category != sb[j].category ||
+            sa[j].imageUrl != sb[j].imageUrl) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   List<MovieModel> _filterForLoggedServices(
       List<MovieModel> input, Set<SupportedService> loggedServices) {
     final result = <MovieModel>[];
@@ -152,12 +171,16 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
               _filterForLoggedServices(freshMerged, loggedServices);
 
           if (filteredFresh.isNotEmpty) {
+            final unchanged =
+                state is MoviesLoaded && _areMovieListsEqual(_movies, filteredFresh);
             merge.replaceAll(filteredFresh);
             _movies
               ..clear()
               ..addAll(filteredFresh);
             _settingsService.setCachedHomeMovies(_movies);
-            emit(MoviesLoaded(List<MovieModel>.from(_movies)));
+            if (!unchanged) {
+              emit(MoviesLoaded(List<MovieModel>.from(_movies)));
+            }
             return;
           }
         }
@@ -167,7 +190,7 @@ class MoviesBloc extends Bloc<MoviesEvent, MoviesState> {
         emit(MoviesError(loadErrors.isNotEmpty
             ? 'Nie udało się załadować filmów:\n${loadErrors.join('\n')}'
             : 'Brak dostępnych filmów'));
-      } else {
+      } else if (state is! MoviesLoaded) {
         emit(MoviesLoaded(List<MovieModel>.from(_movies)));
       }
     } catch (e) {

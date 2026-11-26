@@ -21,6 +21,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _dismissedBanner = false;
+  String? _autoPromptedUpdateId;
   final TvNavController _tvNav = TvNavController.instance;
 
   Widget _buildUpdateBanner(BuildContext context) {
@@ -82,10 +83,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final updateNotifier = getIt<AppUpdateService>().availableUpdate;
+    updateNotifier.addListener(_onAvailableUpdateChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onAvailableUpdateChanged();
+    });
+  }
+
+  void _onAvailableUpdateChanged() {
+    if (!mounted) return;
+    final upd = getIt<AppUpdateService>().availableUpdate.value;
+    if (upd == null || _autoPromptedUpdateId == upd.id) return;
+    _autoPromptedUpdateId = upd.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      AppUpdateDialog.show(context, upd);
+    });
   }
 
   @override
   void dispose() {
+    getIt<AppUpdateService>().availableUpdate.removeListener(
+      _onAvailableUpdateChanged,
+    );
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

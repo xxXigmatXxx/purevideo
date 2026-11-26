@@ -30,7 +30,7 @@ class PosterCacheService {
   static final PosterCacheService instance = PosterCacheService._();
 
   static const int _maxConcurrent = 6;
-  static const int _maxMemoryEntries = 140;
+  static const int _maxMemoryEntries = 260;
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 6),

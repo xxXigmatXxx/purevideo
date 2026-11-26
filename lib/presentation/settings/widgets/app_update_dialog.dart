@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:purevideo/core/utils/device_utils.dart';
 import 'package:purevideo/core/services/app_update_service.dart';
 import 'package:purevideo/di/injection_container.dart';
 
@@ -226,12 +227,14 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
         ),
         if (_needsUnknownSourcesPerm)
           FilledButton.icon(
+            autofocus: DeviceUtils.isTv,
             onPressed: _retryInstallAfterPermission,
             icon: const Icon(Icons.install_mobile),
             label: const Text('Zainstaluj ponownie'),
           )
         else
           FilledButton.icon(
+            autofocus: DeviceUtils.isTv,
             onPressed: _downloading ? null : _startDownloadAndInstall,
             icon: const Icon(Icons.download),
             label: Text(_downloading ? 'Pobieranie...' : 'Pobierz i aktualizuj'),
